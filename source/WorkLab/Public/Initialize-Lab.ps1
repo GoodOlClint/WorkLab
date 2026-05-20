@@ -57,10 +57,25 @@ function Initialize-Lab {
             Invoke-WorkLabProviderCommand -Provider $provider -Verb 'Copy' -Noun 'Vm' -Arguments @{
                 Context = $pctx; TemplateName = $tplName; VmName = $c.VmName; Start = $true
             } | Out-Null
-            Write-PSFMessage -Level Warning -Message "ADDS/role DSC for '{0}' deferred to Phase 2.5 (guest reachability TBD)." -StringValues $c.ComputerName
+
+            # Wait for the in-guest qemu-ga to report reachable. Don't throw
+            # on timeout -- a still-installing/booting clone may take a while;
+            # the rest of the lab can usually proceed without it, and the
+            # caller can re-probe later.
+            $reachable = $false
+            try {
+                $null = Wait-WorkLabProviderGuestAgentReady -Provider $provider -Context $pctx -VmName $c.VmName
+                $reachable = $true
+                Write-PSFMessage -Level Significant -Message "Guest agent reachable on '{0}'; ready for role recipes." -StringValues $c.ComputerName
+            }
+            catch {
+                Write-PSFMessage -Level Warning -Message "Guest agent on '{0}' not reachable within the timeout: {1}" -StringValues $c.ComputerName, $_.Exception.Message
+            }
+
             [pscustomobject]@{
                 Name = $c.VmName; ComputerName = $c.ComputerName; Role = $c.Role
                 Index = $c.Index; Image = $c.Image; Template = $tplName
+                GuestAgentReachable = $reachable
             }
         }
 

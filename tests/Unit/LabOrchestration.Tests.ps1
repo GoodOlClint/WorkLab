@@ -31,6 +31,9 @@ Describe 'Lab orchestration (provider dispatch + discovery seam mocked)' {
                     )
                 }
                 if ($Verb -eq 'Remove' -and $Noun -eq 'Network') { return [pscustomobject]@{ Removed = $true } }
+                if ($Verb -eq 'Test' -and $Noun -eq 'GuestAgent') {
+                    return [pscustomobject]@{ Reachable = $true; VmName = $Arguments.VmName }
+                }
             }
         }
     }
@@ -43,9 +46,11 @@ Describe 'Lab orchestration (provider dispatch + discovery seam mocked)' {
             @($r.Computers).Count | Should -Be 1
             $r.Computers[0].Name | Should -Be 'lab-helloworld-dc01'
             $r.Computers[0].Template | Should -Be 'lab-imgbabcdefgh-tpl01'
+            $r.Computers[0].GuestAgentReachable | Should -BeTrue
             Should -Invoke New-WorkLabImageTemplate -Times 1
             $script:calls[0] | Should -Be 'New-Network'
             $script:calls | Should -Contain 'Copy-Vm'
+            $script:calls | Should -Contain 'Test-GuestAgent'
         }
     }
 
