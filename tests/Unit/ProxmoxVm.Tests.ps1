@@ -49,6 +49,23 @@ Describe 'New-WorkLabProviderVm' {
         }
     }
 
+    It 'normalizes DiskSize ("60G" -> "60") before calling New-PveVm (LVM-storage workaround)' {
+        InModuleScope WorkLab.Proxmox {
+            Mock Connect-WorkLabProxmox { 'S' }
+            Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
+            $script:seenDiskSize = $null
+            Mock New-PveVm -RemoveParameterType 'Session' { $script:seenDiskSize = $DiskSize }
+            $script:made = $false
+            Mock Get-PveVm -RemoveParameterType 'Session' {
+                if ($script:made) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'stopped' } }
+                else { $script:made = $true }
+            }
+            New-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n'; DiskStorage = 'lvm' } } `
+                -VmName lab-demo-dc01 -DiskSize '60G' -Confirm:$false | Out-Null
+            $script:seenDiskSize | Should -Be '60'
+        }
+    }
+
     It 'attaches an ISO (requires IsoStorage) via Set-PveVmConfig' {
         InModuleScope WorkLab.Proxmox {
             Mock Connect-WorkLabProxmox { 'S' }

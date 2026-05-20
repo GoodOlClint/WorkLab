@@ -79,13 +79,20 @@ function New-WorkLabProviderVm {
     }
 
     if ($PSCmdlet.ShouldProcess("$VmName (VMID $($id.VmId))", 'New-PveVm')) {
+        # PSProxmoxVE accepts "60G"-style strings but passes them through to
+        # the Proxmox API verbatim. LVM-backed storages (lvm, lvm-thin) reject
+        # the unit and interpret the suffix as a volume name ("unable to parse
+        # lvm volume name '1G'"); they want a bare integer in GB. File-backed
+        # storages tolerate either. Normalize here so we send what every
+        # storage type accepts.
+        $normalizedDiskSize = Get-WorkLabProxmoxDiskSizeGB -DiskSize $DiskSize
         $newVm = @{
             Node        = $settings.Node
             VmId        = $id.VmId
             Name        = $VmName
             Memory      = $MemoryMB
             Cores       = $Cores
-            DiskSize    = $DiskSize
+            DiskSize    = $normalizedDiskSize
             DiskStorage = $settings.DiskStorage
             Bridge      = $net.Vnet
             Wait        = $true

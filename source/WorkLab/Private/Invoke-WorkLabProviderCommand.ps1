@@ -43,5 +43,15 @@ function Invoke-WorkLabProviderCommand {
         throw "Provider '$($Provider.Name)' module '$($Provider.ModuleName)' does not export '$commandName'. The provider does not satisfy the WorkLab contract (see docs/PROVIDERS.md)."
     }
     Write-PSFMessage -Level Verbose -Message "Dispatching {0} to provider '{1}' ({2})" -StringValues $commandName, $Provider.Name, $Provider.ModuleName
-    & $cmd @Arguments
+
+    # The dispatch seam is internal: the caller (Initialize-Lab, Remove-Lab,
+    # etc.) has already passed its own ShouldProcess gate, and the framework
+    # is the only consumer of provider cmdlets. Force the inner call
+    # non-interactive — provider Remove cmdlets are ConfirmImpact='High' by
+    # default, and on a PSRP / non-interactive host the re-prompt's
+    # PromptForChoice returns null and ShouldProcess throws NullReferenceException.
+    $splat = [hashtable]::new($Arguments)
+    $splat['Confirm'] = $false
+    $splat['WhatIf']  = $false
+    & $cmd @splat
 }

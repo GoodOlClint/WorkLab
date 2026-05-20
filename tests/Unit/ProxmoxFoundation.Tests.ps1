@@ -119,3 +119,39 @@ Describe 'Network cmdlets still fast-fail without Zone' {
             Should -Throw -ExpectedMessage '*Zone*'
     }
 }
+
+Describe 'Get-WorkLabProxmoxDiskSizeGB' {
+    # PSProxmoxVE's New-PveVm -DiskSize takes a string ("e.g. 32G" per its docs)
+    # but passes it through to the Proxmox API verbatim, and LVM storages then
+    # reject the unit suffix ("unable to parse lvm volume name '1G'"). The
+    # framework normalizes defensively to a bare integer-GB string.
+    It 'strips the G suffix' {
+        InModuleScope WorkLab.Proxmox {
+            Get-WorkLabProxmoxDiskSizeGB -DiskSize '60G' | Should -Be '60'
+            Get-WorkLabProxmoxDiskSizeGB -DiskSize '1G'  | Should -Be '1'
+        }
+    }
+    It 'accepts a bare integer unchanged' {
+        InModuleScope WorkLab.Proxmox {
+            Get-WorkLabProxmoxDiskSizeGB -DiskSize '60' | Should -Be '60'
+        }
+    }
+    It 'is case- and whitespace-insensitive; tolerates GB' {
+        InModuleScope WorkLab.Proxmox {
+            Get-WorkLabProxmoxDiskSizeGB -DiskSize ' 32g'  | Should -Be '32'
+            Get-WorkLabProxmoxDiskSizeGB -DiskSize '32GB'  | Should -Be '32'
+        }
+    }
+    It 'converts T / TB to GB' {
+        InModuleScope WorkLab.Proxmox {
+            Get-WorkLabProxmoxDiskSizeGB -DiskSize '2T'  | Should -Be '2048'
+            Get-WorkLabProxmoxDiskSizeGB -DiskSize '1TB' | Should -Be '1024'
+        }
+    }
+    It 'rejects fractional and sub-GB units with a teaching error' {
+        InModuleScope WorkLab.Proxmox {
+            { Get-WorkLabProxmoxDiskSizeGB -DiskSize '1.5G' } | Should -Throw -ExpectedMessage '*integer GB*'
+            { Get-WorkLabProxmoxDiskSizeGB -DiskSize '512M' } | Should -Throw -ExpectedMessage '*integer GB*'
+        }
+    }
+}
