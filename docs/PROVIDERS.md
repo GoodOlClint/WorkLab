@@ -63,17 +63,32 @@ provider modules stay decoupled from the core `WorkLab` classes.
 - `Checkpoint-WorkLabProviderVm` / `Restore-WorkLabProviderVm`
 - `Get-WorkLabProviderCheckpoint` / `Remove-WorkLabProviderCheckpoint`
 
-## Status by provider (through Phase 1)
+### Guest channel (Phase 2.5)
+The universal in-guest reachability surface every provider implements with
+its native mechanism:
+- `Test-WorkLabProviderGuestAgent` — is the agent up + responding.
+- `Invoke-WorkLabProviderGuestCommand` — run a command (cmd + args + timeout).
+- `Write-WorkLabProviderGuestFile` — push a file (string content).
+- `Read-WorkLabProviderGuestFile` — read a file (string content).
+
+Proxmox = qemu-guest-agent (Test-PveVmGuestAgent / Invoke-PveVmGuestExec /
+Write-PveVmGuestFile / Read-PveVmGuestFile). Hyper-V will use PowerShell
+Direct (no in-guest agent needed). VMware will use vSphere guest operations
+(VMware Tools). Core helpers (`Wait-WorkLabProviderGuestAgentReady`,
+`Invoke-WorkLabDscResource`) layer on top through the dispatch seam.
+
+## Status by provider (through Phase 2.5)
 
 | Cmdlet group | Proxmox | Hyper-V | VMware |
 |---|---|---|---|
 | `Test-WorkLabProviderConnection` | **REAL** | stub (Phase 7) | stub (Phase 8) |
 | Network ops | **REAL** | stub (Phase 7) | stub (Phase 8) |
 | ISO / Template / VM / Snapshot | **REAL** | stub (Phase 7) | stub (Phase 8) |
+| Guest channel (Phase 2.5) | **REAL** | stub (Phase 7) | stub (Phase 8) |
 
-The Proxmox provider is fully implemented (all 20 contract cmdlets, REAL +
-idempotent) as of Phase 1. Hyper-V (Phase 7) and VMware (Phase 8) remain
-stubs.
+The Proxmox provider is fully implemented (all 24 contract cmdlets, REAL +
+idempotent) as of Phase 2.5. Hyper-V (Phase 7) and VMware (Phase 8) remain
+stubs across the board.
 
 ### Proxmox provider Options reference
 

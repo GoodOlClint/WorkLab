@@ -87,9 +87,22 @@ correct). Errors teach.
   references a deleted bridge, `Copy-WorkLabProviderVm` re-attaches each
   clone's `net0` to the real per-lab VNet when `Context.Slug` is present.
 
-- **ADDS DSC promotion deferred to Phase 2.5 (open question recorded).** The
-  brief sets DSC = `Invoke-DscResource` over PSRemoting, but does not specify
-  how the control host reaches a guest whose only NIC is on the isolated
-  per-lab SDN VNet. `Initialize-Lab` logs the deferred DSC step and does not
-  attempt it. The reachability model (management route vs. qemu-guest-agent
-  exec) must be decided before Phase 2.5.
+- **Guest channel reachability = native in-guest agent per provider (Phase 2.5
+  decision).** The reachability question the original DSC-over-PSRemoting
+  decision left open is resolved: orchestration reaches guests via the
+  provider's native agent (Proxmox = qemu-guest-agent, Hyper-V = PowerShell
+  Direct, VMware = vSphere guest operations / VMware Tools). Lab VNets stay
+  isolatable; no separate management route required. Trade-off: the agent
+  must be baked into the image (chicken-and-egg — you cannot install the
+  agent through the agent), so `Build-WorkLabImage` takes a `-VirtioWinIso`
+  and injects virtio drivers + qemu-ga MSI + a FirstLogonCommand that
+  installs the MSI BEFORE sysprep. The provider contract grew 20 → 24
+  cmdlets (Test/Invoke/Write/Read GuestAgent/Command/File).
+
+- **Role-specific DSC (ADDS etc.) deferred to recipe-validation rounds.**
+  Phase 2.5 delivers the *channel* + `Invoke-WorkLabDscResource` primitive
+  (verified against the built-in File resource, no extra modules needed).
+  Specific role DSC modules (ActiveDirectoryDsc, SqlServerDsc, etc.) ship
+  with the recipes that need them, when those recipes land — not pre-built
+  into the framework. Scope discipline: don't build infra before it has a
+  consumer.

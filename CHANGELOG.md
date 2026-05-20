@@ -3,6 +3,62 @@
 All notable changes to WorkLab are documented here. Format loosely follows
 Keep a Changelog; the project is pre-1.0 and versioned by build phase.
 
+## [0.4.0] - Phase 2.5
+
+### Added
+- **Provider contract: guest channel (4 new cmdlets, 20 → 24).**
+  `Test-WorkLabProviderGuestAgent`, `Invoke-WorkLabProviderGuestCommand`,
+  `Write-WorkLabProviderGuestFile`, `Read-WorkLabProviderGuestFile`. Every
+  provider implements these against its native in-guest mechanism — no
+  separate management network required, lab VNets stay isolatable.
+- **Proxmox provider: 4 new cmdlets REAL via qemu-guest-agent**
+  (`Test-PveVmGuestAgent` / `Invoke-PveVmGuestExec` / `Write-PveVmGuestFile`
+  / `Read-PveVmGuestFile`). `Test-WorkLabProviderGuestAgent` returns
+  `Reachable=$false` rather than throwing when the agent is down.
+- **`Build-WorkLabImage -VirtioWinIso`**: injects the virtio storage/NIC
+  drivers offline into `install.wim`, stages `qemu-ga.msi` at
+  `C:\Windows\Setup\Files\qemu-ga.msi`, and prepends a FirstLogonCommand to
+  `msiexec /i ... /qn /norestart` **before** the sysprep command. Without
+  this the guest agent cannot exist on the first boot of a cloned VM (you
+  cannot install the agent through the agent). Manifest gains `virtioWinIso`,
+  `virtioSha256`, `guestAgentPath`; idempotency signature includes
+  `virtioSha256`.
+- **Core guest-channel primitives** (private dispatch wrappers):
+  `Wait-WorkLabProviderGuestAgentReady` (poll until reachable; throws on
+  timeout, default 600s/5s), `Invoke-WorkLabGuestCommand`,
+  `Push-WorkLabGuestFile`, `Get-WorkLabGuestFile`. All route through
+  `Invoke-WorkLabProviderCommand` so swapping providers does not touch core.
+- **`Invoke-WorkLabDscResource`**: push a small in-guest script via the guest
+  channel, transport the property hashtable as base64-encoded JSON (PS 5.1
+  in-guest has no `-AsHashtable`), run Test → Set if needed → Test, return
+  JSON. Targets `powershell.exe` (WinPS 5.1, always present); built-in
+  resources (File/Script) work without shipping any DSC modules, so the
+  primitive is exercised end-to-end without role-specific DSC.
+- **`Initialize-Lab` waits for the guest agent** post-clone (per computer);
+  result gains `GuestAgentReachable`. Timeout is a Warning, not a throw —
+  the rest of the lab can usually proceed and the caller can re-probe.
+- Gated `Phase2_5_GuestAgent` integration test: build image with
+  `-VirtioWinIso` → `Initialize-Lab helloworld` on real Proxmox → assert
+  reachable → `Invoke-WorkLabDscResource` against the built-in File
+  resource → read the file back via `Read-WorkLabProviderGuestFile` →
+  `Remove-Lab` cleanup. Skips unless `WORKLAB_VIRTIO_ISO` + Proxmox env set.
+
+### Changed
+- `Initialize-Lab` no longer warns "ADDS/role DSC deferred"; it logs a
+  Significant info line when the agent is reachable. `DscDeferred=$true`
+  remains on the lab summary and now means "no role-specific DSC recipes
+  have been applied" (the *channel* is fully real).
+
+### Decisions recorded
+- **Guest reachability = native in-guest agent per provider.** Closes the
+  Phase 2 open question (DSC-over-PSRemoting on isolated VNets). Proxmox =
+  qemu-ga; Hyper-V (Phase 7) = PowerShell Direct + `Copy-Item -VMSession`;
+  VMware (Phase 8) = vSphere guest operations.
+- **Role-specific DSC (ADDS, SQL, etc.) deferred to recipe-validation
+  rounds.** Phase 2.5 ships the *channel* + `Invoke-WorkLabDscResource`
+  primitive. ActiveDirectoryDsc/SqlServerDsc/etc. ship with the recipes that
+  need them, not pre-built into the framework. Scope discipline.
+
 ## [0.3.1] - Phase 2 verification fix
 
 ### Fixed

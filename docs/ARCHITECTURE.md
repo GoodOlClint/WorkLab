@@ -98,13 +98,44 @@ lab.psd1 ──▶ topology ──▶ components (Role + Image)
    ├─ ensure per-lab network            (provider New-Network)
    ├─ per image: ensure template        (lazy hybrid cache, above)
    ├─ per computer: clone + start       (provider Copy-Vm, re-NIC to lab VNet)
-   └─ DSC promotion ······· deferred to Phase 2.5 (logged, not attempted)
+   ├─ per computer: wait for guest agent (Phase 2.5)
+   └─ role recipes ······················ apply via Invoke-WorkLabDscResource
+                                          over the guest channel (per recipe)
 ```
 
 Core never touches a hypervisor directly — every step dispatches through the
 provider seam. `Remove-Lab`/`Get-Lab`/`Get-LabComputer` compose the same
 seam. DISM/oscdimg live behind mockable private wrappers; the real pipeline
 is gated (Windows + Proxmox + Windows ISO).
+
+## Guest channel reachability (Phase 2.5)
+
+Lab VNets are isolated by default; orchestration reaches guests via the
+provider's native in-guest agent channel rather than direct WinRM/SSH. The
+agent must be baked into the image — chicken-and-egg — so `Build-WorkLabImage`
+takes a `-VirtioWinIso` and injects:
+
+- the virtio storage/NIC drivers offline into `install.wim`, so Windows
+  Setup sees the disk/NIC on Proxmox,
+- the qemu-guest-agent MSI staged at `C:\Windows\Setup\Files\qemu-ga.msi`,
+- a FirstLogonCommand to `msiexec` the MSI BEFORE the sysprep command, so
+  the agent service is registered and survives `/generalize`.
+
+Per-provider mapping:
+
+- **Proxmox** = qemu-guest-agent (`Test-PveVmGuestAgent` / `Invoke-PveVmGuestExec`
+  / `Write-PveVmGuestFile` / `Read-PveVmGuestFile`).
+- **Hyper-V** (Phase 7) = PowerShell Direct + `Copy-Item -VMSession` (no
+  in-guest agent install needed; Integration Services in-box for WS2016+).
+- **VMware** (Phase 8) = vSphere guest operations (VMware Tools).
+
+Core layers `Invoke-WorkLabDscResource` on top: pushes a small in-guest
+script (Test → Set if needed → Test) via `Write-WorkLabProviderGuestFile`,
+executes via `Invoke-WorkLabProviderGuestCommand` (powershell.exe — WinPS
+5.1, always present), reads back a JSON result via
+`Read-WorkLabProviderGuestFile`. Built-in resources (File/Script) work
+without shipping any DSC modules; role recipes ship their own modules
+through the same channel.
 
 ## Phased build plan
 

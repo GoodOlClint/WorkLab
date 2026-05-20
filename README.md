@@ -4,17 +4,20 @@ Provider-agnostic Windows lab framework. Define labs as version-controlled
 PowerShell recipes; provision them on Proxmox, Hyper-V, or VMware through a
 common provider contract.
 
-> **Status: Phase 2** — adds the `Build-WorkLabImage` DISM WIM-patch pipeline
-> (Windows-only), an image cache, a lazy hybrid template cache (ephemeral
-> build network), and REAL
-> `Initialize-Lab`/`Remove-Lab`/`Get-Lab`/`Get-LabComputer` orchestration that
-> stands up the single-DC `helloworld` lab on the Proxmox provider.
-> `Build-WorkLabImage` has been verified end-to-end on a real Windows host
-> (Win11 + ADK + WS2025 ISO → patched bootable ISO + manifest, idempotent
-> re-run). ADDS DSC promotion is **deferred to Phase 2.5** (guest
-> reachability on the isolated per-lab VNet is the open question). On
-> Phase 1: fully implemented Proxmox provider. Hyper-V/VMware remain
-> contract stubs.
+> **Status: Phase 2.5** — guest-channel rails. The provider contract grows
+> from 20 → 24 cmdlets (Test/Invoke/Write/Read GuestAgent/Command/File).
+> `Build-WorkLabImage` takes a `-VirtioWinIso` and bakes the virtio
+> storage/NIC drivers + qemu-guest-agent MSI into the image with a
+> FirstLogonCommand that installs the agent **before** sysprep — closing the
+> chicken-and-egg around reaching guests on isolated per-lab VNets.
+> `Initialize-Lab` now waits for the guest agent post-clone and reports
+> `GuestAgentReachable` per computer. Core gains `Invoke-WorkLabDscResource`
+> (push a small script via the guest channel, run Test → Set if needed →
+> Test, read JSON back) so any DSC resource on any provider works through one
+> universal seam. Role-specific DSC modules (ActiveDirectoryDsc, etc.) ship
+> with the recipes that need them, not pre-built into the framework.
+> Proxmox provider implements the 4 new contract cmdlets REAL via
+> qemu-guest-agent; Hyper-V (Phase 7) and VMware (Phase 8) remain stubs.
 
 ## Quickstart
 
@@ -77,7 +80,7 @@ docs/        ARCHITECTURE, PROVIDERS, RECIPES, DECISIONS
 | 0 ✅ | Skeleton, build/CI, core REAL pieces, contract stubs, Proxmox network ops + 1 integration test |
 | 1 ✅ | Proxmox provider full implementation (VM/ISO/template/snapshots) via PSProxmoxVE |
 | 2 ✅ | `Build-WorkLabImage` (DISM WIM patching) + first single-DC lab (DSC → Phase 2.5) |
-| 2.5 | ADDS DSC promotion via `Invoke-DscResource`; resolve guest reachability on the isolated per-lab VNet |
+| 2.5 ✅ | Guest channel: contract +4 cmdlets, image-baked virtio + qemu-ga, `Invoke-WorkLabDscResource` over provider seam |
 | 3 | VyOS egress firewall (template build, per-lab render, deploy) |
 | 4 | WSUS recipe (optional, gated, UpdateServicesDsc) |
 | 5 | Multi-DC → multi-domain → multi-forest+trust → workgroup-host hybrid |
