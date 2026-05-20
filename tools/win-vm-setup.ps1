@@ -235,22 +235,21 @@ function Install-WorkLabOpenSsh {
         Write-Step 'Firewall rule OpenSSH-Server-In-TCP already present.' 'Skip'
     }
 
-    # Default shell = pwsh 7 (so 'ssh host cmd' lands in pwsh, not Win5.1).
+    # Default shell + powershell subsystem = pwsh 7. Use the 8.3 short name
+    # because Win32-OpenSSH has a long-standing bug (PowerShell/Win32-OpenSSH
+    # #784) where Subsystem entries with spaces in the path silently fail
+    # with `__NamedPipeError__` and `Invoke-Command -HostName` returns
+    # "The SSH transport process has abruptly terminated". The DefaultShell
+    # value is read by some shells fine with spaces, but using the short
+    # name there too keeps the two consistent.
     $pwshExe = 'C:\Program Files\PowerShell\7\pwsh.exe'
     if (Test-Path $pwshExe) {
-        $key = 'HKLM:\SOFTWARE\OpenSSH'
-        if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
-        $current = (Get-ItemProperty -Path $key -Name DefaultShell -ErrorAction SilentlyContinue).DefaultShell
-        if ($current -ne $pwshExe) {
-            if ($PSCmdlet.ShouldProcess('HKLM:\SOFTWARE\OpenSSH DefaultShell', "Set to $pwshExe")) {
-                New-ItemProperty -Path $key -Name DefaultShell -Value $pwshExe -PropertyType String -Force | Out-Null
-                Write-Step ("Set OpenSSH DefaultShell to $pwshExe.") 'OK'
-            }
-        } else {
-            Write-Step 'OpenSSH DefaultShell already set to pwsh 7.' 'Skip'
-        }
+        $pwshShort = Get-WorkLabShortPath -Path $pwshExe
+        Set-WorkLabOpenSshDefaultShell -PwshShortPath $pwshShort
+        $sshdRestartNeeded = Set-WorkLabOpenSshPwshSubsystem -PwshShortPath $pwshShort
     } else {
-        Write-Step 'PowerShell 7 missing; leaving OpenSSH DefaultShell at its default (Windows PowerShell).' 'Warn'
+        Write-Step 'PowerShell 7 missing; leaving OpenSSH DefaultShell + Subsystem at their defaults.' 'Warn'
+        $sshdRestartNeeded = $false
     }
 
     # Optional SSH public key install.
@@ -258,6 +257,78 @@ function Install-WorkLabOpenSsh {
         if (-not $SSHKeyUser) { throw 'SSHPublicKey provided without SSHKeyUser; specify which local account the key belongs to.' }
         Install-WorkLabSshKey -PublicKey $SSHPublicKey -User $SSHKeyUser
     }
+
+    if ($sshdRestartNeeded) {
+        if ($PSCmdlet.ShouldProcess('sshd', 'Restart-Service (to pick up Subsystem change)')) {
+            Write-Step 'Restarting sshd to activate updated Subsystem line.' 'Action'
+            Restart-Service sshd
+            Write-Step 'sshd restarted.' 'OK'
+        }
+    }
+}
+
+function Get-WorkLabShortPath {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { throw "Get-WorkLabShortPath: '$Path' not found." }
+    # Windows-only: GetShortPathName via Scripting.FileSystemObject (no Add-Type needed).
+    $fso = New-Object -ComObject Scripting.FileSystemObject
+    try {
+        $file = $fso.GetFile($Path)
+        return $file.ShortPath
+    } finally {
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($fso)
+    }
+}
+
+function Set-WorkLabOpenSshDefaultShell {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)][string]$PwshShortPath)
+    $key = 'HKLM:\SOFTWARE\OpenSSH'
+    if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+    $current = (Get-ItemProperty -Path $key -Name DefaultShell -ErrorAction SilentlyContinue).DefaultShell
+    if ($current -eq $PwshShortPath) {
+        Write-Step ("OpenSSH DefaultShell already set to $PwshShortPath.") 'Skip'
+        return
+    }
+    if ($PSCmdlet.ShouldProcess('HKLM:\SOFTWARE\OpenSSH DefaultShell', "Set to $PwshShortPath")) {
+        New-ItemProperty -Path $key -Name DefaultShell -Value $PwshShortPath -PropertyType String -Force | Out-Null
+        Write-Step ("Set OpenSSH DefaultShell to $PwshShortPath (8.3 form, no spaces).") 'OK'
+    }
+}
+
+function Set-WorkLabOpenSshPwshSubsystem {
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][string]$PwshShortPath)
+    # Returns $true if sshd_config was modified (caller should restart sshd).
+    $cfg = "$env:ProgramData\ssh\sshd_config"
+    if (-not (Test-Path $cfg)) {
+        Write-Step "sshd_config missing at $cfg; can't configure powershell subsystem." 'Warn'
+        return $false
+    }
+    $desired = ('Subsystem powershell {0} -sshs -NoLogo -NoProfile' -f $PwshShortPath)
+    $lines = Get-Content -Path $cfg
+    $existingIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*#?\s*Subsystem\s+powershell\b') { $existingIdx = $i; break }
+    }
+    if ($existingIdx -ge 0 -and $lines[$existingIdx].Trim() -ceq $desired) {
+        Write-Step 'sshd_config Subsystem powershell already matches (8.3 path, sshs).' 'Skip'
+        return $false
+    }
+    if (-not $PSCmdlet.ShouldProcess($cfg, "Set Subsystem powershell = $desired")) { return $false }
+    if ($existingIdx -ge 0) {
+        $lines[$existingIdx] = $desired
+        Write-Step ('Replaced sshd_config Subsystem powershell line ({0}).' -f ($existingIdx + 1)) 'OK'
+    } else {
+        $lines = @($lines) + @('', '# Added by win-vm-setup.ps1', $desired)
+        Write-Step 'Appended Subsystem powershell to sshd_config.' 'OK'
+    }
+    # Back up once, then write atomically.
+    $bak = "$cfg.wlbak"
+    if (-not (Test-Path $bak)) { Copy-Item $cfg $bak -Force }
+    Set-Content -Path $cfg -Value $lines -Encoding ASCII
+    return $true
 }
 
 function Install-WorkLabSshKey {
@@ -266,6 +337,9 @@ function Install-WorkLabSshKey {
 
     $user = Get-LocalUser -Name $User -ErrorAction SilentlyContinue
     if (-not $user) { throw "Local user '$User' does not exist. Create the account first or pass an existing user via -SSHKeyUser." }
+    if (-not $user.Enabled) {
+        Write-Step ("Local user '$User' exists but is DISABLED. The key will be installed but the account can never authenticate via SSH. (Built-in Administrator is disabled by default on Win11; specify a different SSHKeyUser if that's the issue.)") 'Warn'
+    }
 
     $isAdmin = (Get-LocalGroupMember -Group 'Administrators' -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -match "\\$User$" })
@@ -350,13 +424,18 @@ function Set-WorkLabUserEnv {
     foreach ($name in ($EnvVars.Keys | Sort-Object)) {
         $want = [string]$EnvVars[$name]
         $have = [Environment]::GetEnvironmentVariable($name, 'User')
+        # Redact values for anything that looks like a secret so the script's
+        # output (which may end up in CI logs, screen recordings, or a chat
+        # transcript) does not leak the value.
+        $isSecret = $name -match '(?i)(TOKEN|SECRET|PASSWORD|PWD|APIKEY|API_KEY|CREDENTIAL)'
+        $shown = if ($isSecret) { "<redacted, len=$($want.Length)>" } else { "'$want'" }
         if ($have -eq $want) {
             Write-Step ("env:$name already set to expected value (User scope).") 'Skip'
             continue
         }
-        if ($PSCmdlet.ShouldProcess("env:$name (User scope)", "Set to '$want'")) {
+        if ($PSCmdlet.ShouldProcess("env:$name (User scope)", "Set to $shown")) {
             [Environment]::SetEnvironmentVariable($name, $want, 'User')
-            Write-Step ("Set User env:$name = '$want'") 'OK'
+            Write-Step ("Set User env:$name = $shown") 'OK'
         }
     }
 }
