@@ -3,6 +3,19 @@
 All notable changes to WorkLab are documented here. Format loosely follows
 Keep a Changelog; the project is pre-1.0 and versioned by build phase.
 
+## [0.3.1] - Phase 2 verification fix
+
+### Fixed
+- `Expand-WorkLabIsoSource` now clears the read-only attribute across the
+  extracted tree, and `Mount-WorkLabWim` defensively clears it on the WIM
+  before mount. Without this, `Mount-WindowsImage` failed with
+  "You do not have permissions to mount and modify this image..." because
+  files copied from a mounted ISO inherit the source's read-only flag.
+  Surfaced by the first real end-to-end run of `Build-WorkLabImage` on a
+  Windows host (Win11 + ADK + WS2025 ISO) — exactly the scenario the
+  Phase 2 mocked unit tests could not cover. End-to-end now completes in
+  ~3 min and produces an idempotent, manifest-sha-checked patched ISO.
+
 ## [0.3.0] - Phase 2
 
 ### Added

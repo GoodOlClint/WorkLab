@@ -23,5 +23,15 @@ function Expand-WorkLabIsoSource {
     finally {
         Dismount-DiskImage -ImagePath $SourceIso | Out-Null
     }
+
+    # Files copied from a mounted ISO inherit the source's read-only flag;
+    # DISM's Mount-WindowsImage refuses to take a writable mount on a
+    # read-only install.wim ("You do not have permissions to mount and modify
+    # this image..."). Clear read-only across the extracted tree so DISM can
+    # service the WIM and we can write the autounattend + rebuild the ISO.
+    Get-ChildItem -LiteralPath $WorkDir -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Where-Object IsReadOnly |
+        ForEach-Object { $_.IsReadOnly = $false }
+
     $WorkDir
 }
