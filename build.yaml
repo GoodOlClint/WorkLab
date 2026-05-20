@@ -1,0 +1,31 @@
+---
+# WorkLab monorepo build configuration (Sampler-flavored).
+# Stock Sampler is single-module; this repo builds every module under source/.
+
+ModuleVersion: '0.1.0'
+
+# Modules assembled by the `build` task, in dependency order.
+# WorkLab core first; providers and DSC may type-reference its contract.
+Modules:
+  - WorkLab
+  - WorkLab.Proxmox
+  - WorkLab.HyperV
+  - WorkLab.VMware
+  - WorkLabDsc
+
+Build:
+  # Folder-style modules: assembled by copying source -> output (no ModuleBuilder
+  # merge in Phase 0). Classes/Private/Public are dot-sourced by each .psm1.
+  OutputDirectory: output
+
+Test:
+  ScriptAnalyzer:
+    Enabled: true
+    SettingsPath: .build/ScriptAnalyzerSettings.psd1
+  Pester:
+    UnitPath: tests/Unit
+    IntegrationPath: tests/Integration
+    OutputFormat: NUnitXml
+
+CodeCoverage:
+  Enabled: false   # enabled from Phase 1 once real implementations land

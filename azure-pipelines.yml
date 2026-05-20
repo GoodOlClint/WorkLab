@@ -1,0 +1,57 @@
+# Azure Pipelines — WorkLab monorepo build + test (parallel matrix).
+trigger:
+  branches:
+    include: [main]
+pr:
+  branches:
+    include: [main]
+
+variables:
+  buildModulesCache: $(Pipeline.Workspace)/output/RequiredModules
+
+stages:
+  - stage: BuildTest
+    displayName: Build + Test
+    jobs:
+      - job: build_test
+        displayName: build+test
+        strategy:
+          matrix:
+            Linux:
+              imageName: 'ubuntu-latest'
+            Windows:
+              imageName: 'windows-latest'
+        pool:
+          vmImage: $(imageName)
+        steps:
+          - task: Cache@2
+            inputs:
+              key: 'reqmods | "$(Agent.OS)" | RequiredModules.psd1'
+              path: output/RequiredModules
+            displayName: Cache build dependencies
+
+          - pwsh: ./build.ps1 -Tasks build,test
+            displayName: Build + unit tests + analyzer
+
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: 'NUnit'
+              testResultsFiles: 'output/testResults/*.xml'
+              testRunTitle: 'WorkLab Unit ($(Agent.OS))'
+
+      - job: integration
+        displayName: integration (Proxmox, gated)
+        dependsOn: build_test
+        condition: succeeded()
+        pool:
+          vmImage: 'ubuntu-latest'
+        # Self-skips unless WORKLAB_PROXMOX_TEST_HOST is provided as a pipeline
+        # variable / secret.
+        steps:
+          - pwsh: ./build.ps1 -Tasks integration
+            displayName: Integration tests
+            env:
+              WORKLAB_PROXMOX_TEST_HOST: $(WORKLAB_PROXMOX_TEST_HOST)
+              WORKLAB_PROXMOX_TEST_TOKEN: $(WORKLAB_PROXMOX_TEST_TOKEN)
+              WORKLAB_PROXMOX_TEST_NODE: $(WORKLAB_PROXMOX_TEST_NODE)
