@@ -30,6 +30,11 @@
         'Restore-WorkLabProviderVm'
         'Get-WorkLabProviderCheckpoint'
         'Remove-WorkLabProviderCheckpoint'
+        # Phase 2.5 guest channel (stubbed; implementation in Phase 7)
+        'Test-WorkLabProviderGuestAgent'
+        'Invoke-WorkLabProviderGuestCommand'
+        'Write-WorkLabProviderGuestFile'
+        'Read-WorkLabProviderGuestFile'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

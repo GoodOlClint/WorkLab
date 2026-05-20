@@ -16,6 +16,11 @@ BeforeAll {
         'Start-WorkLabProviderVm', 'Stop-WorkLabProviderVm', 'Remove-WorkLabProviderVm'
         'Checkpoint-WorkLabProviderVm', 'Restore-WorkLabProviderVm'
         'Get-WorkLabProviderCheckpoint', 'Remove-WorkLabProviderCheckpoint'
+        # Phase 2.5 guest channel (4 new cmdlets)
+        'Test-WorkLabProviderGuestAgent'
+        'Invoke-WorkLabProviderGuestCommand'
+        'Write-WorkLabProviderGuestFile'
+        'Read-WorkLabProviderGuestFile'
     )
 }
 
@@ -24,9 +29,9 @@ Describe 'Provider contract surface' -ForEach @(
     @{ Module = 'WorkLab.HyperV' }
     @{ Module = 'WorkLab.VMware' }
 ) {
-    It '<Module> exports all 20 contract cmdlets, each taking -Context' {
+    It '<Module> exports all 24 contract cmdlets, each taking -Context' {
         $exported = (Get-Module $Module).ExportedCommands
-        $exported.Count | Should -Be 20
+        $exported.Count | Should -Be 24
         foreach ($name in $script:Contract) {
             $cmd = $exported[$name]
             $cmd | Should -Not -BeNullOrEmpty -Because "$Module must export $name"
@@ -41,7 +46,9 @@ Describe 'Stubs throw NotImplementedException' {
     It '<Provider> <Cmdlet> (Phase <Phase>) throws NotImplementedException' -ForEach @(
         @{ Provider = 'WorkLab.HyperV';  Cmdlet = 'New-WorkLabProviderVm'; Phase = 7 }
         @{ Provider = 'WorkLab.HyperV';  Cmdlet = 'Test-WorkLabProviderConnection';  Phase = 7 }
+        @{ Provider = 'WorkLab.HyperV';  Cmdlet = 'Test-WorkLabProviderGuestAgent';  Phase = 7 }
         @{ Provider = 'WorkLab.VMware';  Cmdlet = 'New-WorkLabProviderNetwork'; Phase = 8 }
+        @{ Provider = 'WorkLab.VMware';  Cmdlet = 'Invoke-WorkLabProviderGuestCommand'; Phase = 8 }
     ) {
         $cmd = (Get-Module $Provider).ExportedCommands[$Cmdlet]
         { & $cmd -Context @{ Options = @{} } } |
