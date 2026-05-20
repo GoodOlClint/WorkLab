@@ -10,7 +10,7 @@
     # --- Build / test toolchain ---
     InvokeBuild        = 'latest'
     Pester             = '5.5.0'
-    PSScriptAnalyzer   = 'latest'
+    PSScriptAnalyzer   = '1.25.0'   # pin: PSDepend 'latest' resolved to an older build that NREs on the Windows runner
     Sampler            = 'latest'   # conventions + future ModuleBuilder use
 
     # --- Runtime dependencies of the WorkLab modules ---

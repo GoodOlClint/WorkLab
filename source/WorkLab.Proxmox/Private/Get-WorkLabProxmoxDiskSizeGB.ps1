@@ -28,14 +28,19 @@ function Get-WorkLabProxmoxDiskSizeGB {
         [Parameter(Mandatory)][string]$DiskSize
     )
     $s = $DiskSize.Trim()
-    if ($s -match '^(?<n>\d+)\s*(?<u>G|GB|T|TB)?$') {
-        $n = [int]$matches['n']
-        $u = if ($matches['u']) { $matches['u'].ToUpperInvariant() } else { 'G' }
-        $gb = switch -Regex ($u) {
-            '^G(B)?$' { $n }
-            '^T(B)?$' { $n * 1024 }
-        }
-        return [string]$gb
+    if ($s -notmatch '^(?<n>\d+)\s*(?<u>G|GB|T|TB)?$') {
+        throw "Invalid DiskSize '$DiskSize'. Use integer GB (e.g. '60' or '60G'); fractional sizes and units below G are not supported."
     }
-    throw "Invalid DiskSize '$DiskSize'. Use integer GB (e.g. '60' or '60G'); fractional sizes and units below G are not supported."
+    $n = [int]$matches['n']
+    $u = if ($matches['u']) { $matches['u'].ToUpperInvariant() } else { 'G' }
+    # Plain switch (not -Regex) — avoids a PSScriptAnalyzer-on-Windows
+    # NullReferenceException we hit with a `switch -Regex` containing a
+    # capture-group pattern. Plain switch is simpler anyway.
+    $gb = switch ($u) {
+        'G'  { $n; break }
+        'GB' { $n; break }
+        'T'  { $n * 1024; break }
+        'TB' { $n * 1024; break }
+    }
+    return [string]$gb
 }
