@@ -15,6 +15,7 @@ function New-WorkLabAutounattend {
         [Parameter(Mandatory)][string]$Edition,
         [Parameter(Mandatory)][securestring]$AdminPassword,
         [Parameter()][string]$Locale = 'en-US',
+        [Parameter()][string]$GuestAgentMsiPath,
         [Parameter(Mandatory)][string]$OutFile
     )
 
@@ -27,6 +28,16 @@ function New-WorkLabAutounattend {
     else {
         "<MetaData wcm:action=`"add`"><Key>/IMAGE/NAME</Key><Value>$Edition</Value></MetaData>"
     }
+
+    # Build FirstLogonCommands: install the guest agent (when supplied) BEFORE
+    # sysprep so the agent service is registered and survives generalize. The
+    # commands run sequentially under AutoLogon=Administrator.
+    $cmds = [System.Collections.Generic.List[string]]::new()
+    if ($GuestAgentMsiPath) {
+        $cmds.Add(('        <SynchronousCommand wcm:action="add"><Order>{0}</Order><CommandLine>msiexec /i "{1}" /qn /norestart</CommandLine><Description>WorkLab guest-agent install (Phase 2.5)</Description></SynchronousCommand>' -f ($cmds.Count + 1), $GuestAgentMsiPath))
+    }
+    $cmds.Add(('        <SynchronousCommand wcm:action="add"><Order>{0}</Order><CommandLine>%WINDIR%\System32\Sysprep\Sysprep.exe /generalize /oobe /shutdown /quiet</CommandLine><Description>WorkLab sysprep and shutdown (build-complete signal)</Description></SynchronousCommand>' -f ($cmds.Count + 1)))
+    $firstLogon = $cmds -join "`n"
 
     $xml = @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -51,7 +62,7 @@ function New-WorkLabAutounattend {
       <ComputerName>*</ComputerName>
       <AutoLogon><Password><Value>$enc</Value><PlainText>false</PlainText></Password><Enabled>true</Enabled><Username>Administrator</Username><LogonCount>1</LogonCount></AutoLogon>
       <FirstLogonCommands>
-        <SynchronousCommand wcm:action="add"><Order>1</Order><CommandLine>%WINDIR%\System32\Sysprep\Sysprep.exe /generalize /oobe /shutdown /quiet</CommandLine><Description>WorkLab sysprep and shutdown (build-complete signal)</Description></SynchronousCommand>
+$firstLogon
       </FirstLogonCommands>
     </component>
   </settings>

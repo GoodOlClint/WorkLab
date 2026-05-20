@@ -35,6 +35,28 @@ Describe 'New-WorkLabAutounattend' {
                 $xml | Should -BeLike '*/IMAGE/INDEX*'
                 $xml | Should -BeLike '*Sysprep.exe /generalize /oobe /shutdown*'
                 $xml | Should -BeLike '*<AutoLogon>*'
+                # No guest-agent install command when -GuestAgentMsiPath omitted
+                $xml | Should -Not -BeLike '*msiexec*qemu-ga*'
+            }
+            finally { Remove-Item $out -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'injects an agent-install SynchronousCommand BEFORE sysprep when -GuestAgentMsiPath is set' {
+        InModuleScope WorkLab {
+            $ss = ConvertTo-SecureString 'P@ss' -AsPlainText -Force
+            $out = Join-Path ([IO.Path]::GetTempPath()) "wl-au2-$([guid]::NewGuid().ToString('N')).xml"
+            try {
+                New-WorkLabAutounattend -Edition 1 -AdminPassword $ss `
+                    -GuestAgentMsiPath 'C:\Windows\Setup\Files\qemu-ga.msi' -OutFile $out | Out-Null
+                $xml = Get-Content -LiteralPath $out -Raw
+                $xml | Should -BeLike '*msiexec /i "C:\Windows\Setup\Files\qemu-ga.msi" /qn /norestart*'
+                $xml | Should -BeLike '*<Order>1</Order>*msiexec*'
+                $xml | Should -BeLike '*<Order>2</Order>*Sysprep.exe /generalize*'
+                # Agent install precedes sysprep textually as well.
+                $msiIdx = $xml.IndexOf('msiexec')
+                $sysIdx = $xml.IndexOf('Sysprep.exe')
+                $msiIdx | Should -BeLessThan $sysIdx
             }
             finally { Remove-Item $out -ErrorAction SilentlyContinue }
         }
@@ -159,6 +181,60 @@ Describe 'Build-WorkLabImage pipeline (seams mocked)' {
                 Should -Throw -ExpectedMessage '*driver injection blew up*'
             $script:discarded | Should -Be 1
         }
+    }
+
+    It 'with -VirtioWinIso: injects virtio drivers, stages qemu-ga MSI, and threads GuestAgentMsiPath through' {
+        $virtioSrc = Join-Path ([IO.Path]::GetTempPath()) "wl-virtio-$([guid]::NewGuid().ToString('N')).iso"
+        Set-Content -LiteralPath $virtioSrc -Value 'fake-virtio' -NoNewline
+        try {
+            InModuleScope WorkLab -Parameters @{ Src = $script:Src; Cred = $script:Cred; VSrc = $virtioSrc } {
+                param([string]$Src, [pscredential]$Cred, [string]$VSrc)
+
+                Mock Assert-WorkLabDismAvailable { }
+                Mock Resolve-WorkLabImageAdminCredential { $Cred }
+                Mock Expand-WorkLabIsoSource { param($SourceIso, $WorkDir) $WorkDir }
+                Mock Mount-WorkLabWim { param($WimPath, $Edition, $MountDir) $MountDir }
+                $script:wimAdds = 0
+                Mock Add-WorkLabWimContent { $script:wimAdds++ }
+                Mock Dismount-WorkLabWim { }
+                Mock New-WorkLabBootableIso { param($WorkDir, $IsoPath) Set-Content -LiteralPath $IsoPath -Value 'iso'; $IsoPath }
+
+                $script:virtioMounts = 0
+                $script:virtioDismounts = 0
+                Mock Mount-WorkLabVirtioWin {
+                    $script:virtioMounts++
+                    [pscustomobject]@{
+                        Volume = '/v'; DriverPath = '/v/amd64'
+                        AgentMsiPath = '/v/guest-agent/qemu-ga-x86_64.msi'
+                    }
+                }
+                Mock Dismount-WorkLabVirtioWin { $script:virtioDismounts++ }
+
+                $script:msiCopies = 0
+                Mock Copy-Item -ParameterFilter { "$LiteralPath" -like '*qemu-ga*.msi' } { $script:msiCopies++ }
+
+                # Capture the agent path Autounattend was called with. Pester
+                # mocks expose bound params as auto-vars; $PSBoundParameters in
+                # the mock body is the *mock scriptblock's* PSBP, not the
+                # mocked cmdlet's.
+                $script:auaGuestAgent = $null
+                Mock New-WorkLabAutounattend { $script:auaGuestAgent = $GuestAgentMsiPath; $OutFile }
+
+                $r = Build-WorkLabImage -Name wsv -SourceIso $Src -VirtioWinIso $VSrc -Confirm:$false
+                $r.Existed | Should -BeFalse
+                $r.Manifest.virtioSha256 | Should -Match '^[0-9a-f]{64}$'
+                $r.Manifest.guestAgentPath | Should -Be 'C:\Windows\Setup\Files\qemu-ga.msi'
+
+                $script:virtioMounts | Should -Be 1
+                $script:virtioDismounts | Should -Be 1
+                $script:msiCopies | Should -Be 1
+                # Two Add-WorkLabWimContent calls: virtio drivers + user(empty) drivers/updates.
+                $script:wimAdds | Should -Be 2
+                # Autounattend received the in-guest agent path.
+                $script:auaGuestAgent | Should -Be 'C:\Windows\Setup\Files\qemu-ga.msi'
+            }
+        }
+        finally { Remove-Item -LiteralPath $virtioSrc -ErrorAction SilentlyContinue }
     }
 
     It 'throws when the source ISO is missing (after the Windows gate)' {
