@@ -59,13 +59,14 @@ Describe 'Proxmox VM lifecycle (lightweight)' -Skip:(-not $script:ProxmoxGate) {
         # Checkpoint cmdlet now fast-fails with a teaching error in that
         # case; verifying that path requires a snapshot-capable storage.
         $cap = & (Get-Module WorkLab.Proxmox) {
-            param($DiskStorage, $Session)
-            $session = Connect-WorkLabProxmox -Settings ([pscustomobject]@{
-                Server = $env:WORKLAB_PROXMOX_TEST_HOST
-                Port = if ($env:WORKLAB_PROXMOX_TEST_PORT) { [int]$env:WORKLAB_PROXMOX_TEST_PORT } else { 8006 }
-                ApiToken = $env:WORKLAB_PROXMOX_TEST_TOKEN
+            param($DiskStorage)
+            $settings = @{
+                Server               = $env:WORKLAB_PROXMOX_TEST_HOST
+                Port                 = if ($env:WORKLAB_PROXMOX_TEST_PORT) { [int]$env:WORKLAB_PROXMOX_TEST_PORT } else { 8006 }
+                ApiToken             = $env:WORKLAB_PROXMOX_TEST_TOKEN
                 SkipCertificateCheck = $true
-            })
+            }
+            $session = Connect-WorkLabProxmox -Settings $settings
             Test-WorkLabProxmoxStorageFeature -Settings @{} -Session $session -Storage $DiskStorage -Feature 'Snapshot'
         } $env:WORKLAB_PROXMOX_TEST_DISK_STORAGE
         if (-not $cap.Supported) {
