@@ -63,13 +63,19 @@ Describe 'Resolve-WorkLabOscdimg' {
     }
 
     It 'falls back to the ADK default location when not on PATH' {
-        ${env:ProgramFiles(x86)} = '/fake/pf86'
-        InModuleScope WorkLab {
+        # Platform-native fake root: Join-Path on Windows normalizes / to \,
+        # so the assertion must use the native separator. Pass into the
+        # InModuleScope so the inner assertion sees the same value.
+        $sep = [IO.Path]::DirectorySeparatorChar
+        $fakeRoot = "${sep}fake${sep}pf86"
+        ${env:ProgramFiles(x86)} = $fakeRoot
+        InModuleScope WorkLab -Parameters @{ FakeRoot = $fakeRoot } {
+            param($FakeRoot)
             Mock Get-Command -ParameterFilter { $Name -eq 'oscdimg.exe' } { }
             Mock Test-Path { $true } -ParameterFilter { "$LiteralPath" -like '*Oscdimg*oscdimg.exe' }
             $result = Resolve-WorkLabOscdimg
             $result | Should -BeLike '*Oscdimg*oscdimg.exe'
-            $result | Should -BeLike '/fake/pf86*'
+            $result | Should -BeLike "$FakeRoot*"
         }
     }
 
