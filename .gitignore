@@ -14,3 +14,9 @@ coverage*.xml
 
 # PowerShell
 *.ps1xml.bak
+
+# VM-setup config carrying secrets (Proxmox token etc.)
+# Keep tools/win-vm-setup.example.psd1 tracked; anything else in tools/*.psd1
+# is operator-local.
+tools/*.psd1
+!tools/win-vm-setup.example.psd1
