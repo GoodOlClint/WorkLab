@@ -1,0 +1,36 @@
+TOPIC
+    about_WorkLab
+
+SHORT DESCRIPTION
+    WorkLab is a provider-agnostic framework for building Windows labs across
+    Proxmox, Hyper-V, and VMware from version-controlled PowerShell recipes.
+
+LONG DESCRIPTION
+    WorkLab separates four concerns:
+
+      * Core (WorkLab)        - recipe discovery, provider registry, secret
+                                routing, logging, lifecycle orchestration.
+                                Contains zero hypervisor-specific code.
+      * Providers             - WorkLab.Proxmox / .HyperV / .VMware implement
+                                an identical cmdlet contract.
+      * Recipes               - lab / topology / component (PSD1) and app
+                                (PowerShell module) definitions, discovered via
+                                a three-source seam.
+      * DSC (WorkLabDsc)      - composite resources composing upstream DSC.
+
+    The single object that flows through every cmdlet is LabContext. The only
+    module-scoped mutable state is the provider registration table.
+
+DISCOVERY SEAM
+    Resolve-WorkLabRecipePath returns roots in precedence order: in-tree,
+    side-loaded ($env:WORKLAB_RECIPE_PATH), then installed modules tagged
+    'WorkLabRecipe'. See docs/RECIPES.md.
+
+SECRETS
+    WorkLab is vault-agnostic. It calls SecretManagement directly and routes
+    to the user's registered default vault. It never registers or selects a
+    vault. Secret names follow worklab/<slug>/<role>/<name>.
+
+SEE ALSO
+    Get-WorkLabRecipe, Register-WorkLabProvider, New-WorkLabSecret,
+    Test-WorkLabSlugCollision, docs/ARCHITECTURE.md, docs/PROVIDERS.md
