@@ -17,6 +17,11 @@ Describe 'Checkpoint-WorkLabProviderVm' {
         InModuleScope WorkLab.Proxmox {
             Mock Connect-WorkLabProxmox { 'S' }
             Mock Get-PveVm -RemoveParameterType 'Session' { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'stopped' } }
+            # Capability check (added when Checkpoint started fast-failing on
+            # snapshot-incapable storages): give it a snapshot-capable type so
+            # this test stays focused on idempotency.
+            Mock Get-PveVmConfig -RemoveParameterType 'Session' { [pscustomobject]@{ Scsi0 = 'tank:vm-9123-disk-0,size=60G' } }
+            Mock Get-PveStorage -RemoveParameterType 'Session' { [pscustomobject]@{ Storage = 'tank'; Type = 'zfspool' } }
             $script:made = 0
             Mock New-PveSnapshot -RemoveParameterType 'Session' { $script:made++ }
             Mock Get-PveSnapshot -RemoveParameterType 'Session' { }   # none yet

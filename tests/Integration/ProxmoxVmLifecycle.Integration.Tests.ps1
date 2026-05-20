@@ -54,6 +54,25 @@ Describe 'Proxmox VM lifecycle (lightweight)' -Skip:(-not $script:ProxmoxGate) {
     }
 
     It 'checkpoints, lists, restores, then removes the checkpoint' {
+        # Self-skip when the configured DiskStorage doesn't support snapshots
+        # (plain LVM, iSCSI-LVM, raw on dir/nfs, etc.). The framework's
+        # Checkpoint cmdlet now fast-fails with a teaching error in that
+        # case; verifying that path requires a snapshot-capable storage.
+        $cap = & (Get-Module WorkLab.Proxmox) {
+            param($DiskStorage, $Session)
+            $session = Connect-WorkLabProxmox -Settings ([pscustomobject]@{
+                Server = $env:WORKLAB_PROXMOX_TEST_HOST
+                Port = if ($env:WORKLAB_PROXMOX_TEST_PORT) { [int]$env:WORKLAB_PROXMOX_TEST_PORT } else { 8006 }
+                ApiToken = $env:WORKLAB_PROXMOX_TEST_TOKEN
+                SkipCertificateCheck = $true
+            })
+            Test-WorkLabProxmoxStorageFeature -Settings @{} -Session $session -Storage $DiskStorage -Feature 'Snapshot'
+        } $env:WORKLAB_PROXMOX_TEST_DISK_STORAGE
+        if (-not $cap.Supported) {
+            Set-ItResult -Skipped -Because ("storage '$($cap.Storage)' (type '$($cap.Type)') doesn't support snapshots; set WORKLAB_PROXMOX_TEST_DISK_STORAGE to one of: $($cap.Suggestion)")
+            return
+        }
+
         (Checkpoint-WorkLabProviderVm -Context $script:Ctx -VmName $script:VmName -CheckpointName pre -Confirm:$false).Existed | Should -BeFalse
         (Get-WorkLabProviderCheckpoint -Context $script:Ctx -VmName $script:VmName).Name | Should -Contain 'pre'
         (Restore-WorkLabProviderVm -Context $script:Ctx -VmName $script:VmName -CheckpointName pre -Confirm:$false).Restored | Should -BeTrue

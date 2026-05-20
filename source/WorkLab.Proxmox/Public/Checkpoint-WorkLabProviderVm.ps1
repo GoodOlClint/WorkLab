@@ -45,6 +45,22 @@ function Checkpoint-WorkLabProviderVm {
     }
     $settings = $t.Settings; $session = $t.Session; $id = $t.Identity
 
+    # Fast-fail before issuing a snapshot the Proxmox API will reject. Plain
+    # LVM and iSCSI storages don't support snapshots, and the "snapshot
+    # feature is not available" error the API returns is too late and too
+    # opaque. Capability-check every disk's backing storage so the error
+    # names the offender and the fix.
+    $vmCfg = Get-PveVmConfig -Node $settings.Node -VmId $id.VmId -Session $session -ErrorAction Stop
+    $diskStorages = Get-WorkLabProxmoxVmDiskStorages -Config $vmCfg
+    foreach ($s in $diskStorages) {
+        $cap = Test-WorkLabProxmoxStorageFeature -Settings $settings -Session $session -Storage $s -Feature 'Snapshot'
+        if (-not $cap.Supported) {
+            throw ("VM '{0}' has a disk on storage '{1}' (type '{2}') which does not support snapshots. " +
+                   "Move the disk to a snapshot-capable storage type ({3}) before snapshotting.") -f `
+                $VmName, $cap.Storage, $cap.Type, $cap.Suggestion
+        }
+    }
+
     $existing = Get-WorkLabProxmoxSnapshot -Settings $settings -Session $session -VmId $id.VmId -Name $CheckpointName
     if ($existing) {
         Write-Warning "Snapshot '$CheckpointName' already exists on '$VmName'; reconciled (no change)."
