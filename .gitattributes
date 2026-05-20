@@ -1,0 +1,39 @@
+# Normalize line endings to LF on commit. PowerShell handles either, but
+# consistent LF in the repo prevents mixed-EOL diffs when Windows clones
+# the repo (autocrlf-style flips are noisy in PRs).
+* text=auto eol=lf
+
+# Source + config files (explicit for clarity)
+*.ps1    text eol=lf
+*.psm1   text eol=lf
+*.psd1   text eol=lf
+*.xml    text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.txt    text eol=lf
+LICENSE  text eol=lf
+
+# Binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.iso    binary
+*.wim    binary
+*.zip    binary
+*.7z     binary
+*.gz     binary
+*.cab    binary
+*.msu    binary
+*.msi    binary
+*.exe    binary
+*.dll    binary
+*.pdf    binary
+
+# GitHub linguist hints — keep README/docs counted as English text rather
+# than misclassified as PowerShell because the repo is PS-heavy.
+*.md    linguist-documentation
+docs/*  linguist-documentation

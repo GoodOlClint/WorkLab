@@ -1,0 +1,16 @@
+# Build output
+output/
+*.nupkg
+
+# Test artifacts
+testResults/
+coverage*.xml
+
+# OS / editor
+.DS_Store
+.vs/
+.vscode/
+*.user
+
+# PowerShell
+*.ps1xml.bak
