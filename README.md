@@ -5,18 +5,16 @@ PowerShell recipes; provision them on Proxmox, Hyper-V, or VMware through a
 common provider contract.
 
 > **Status: Phase 2** — adds the `Build-WorkLabImage` DISM WIM-patch pipeline
-> (Windows-only; mocked on non-Windows), an image cache, a lazy hybrid
-> template cache (ephemeral build network), and REAL
+> (Windows-only), an image cache, a lazy hybrid template cache (ephemeral
+> build network), and REAL
 > `Initialize-Lab`/`Remove-Lab`/`Get-Lab`/`Get-LabComputer` orchestration that
-> stands up the single-DC `helloworld` lab on the Proxmox provider. ADDS DSC
-> promotion is **deferred to Phase 2.5** (guest reachability on the isolated
-> per-lab VNet is unresolved). On Phase 1: fully implemented Proxmox provider.
-> Hyper-V/VMware remain contract stubs.
->
-> **Verification note:** the DISM/boot/sysprep path is Windows-only and
-> **cannot be exercised on the macOS dev box** — it is covered by mocked
-> unit tests plus a gated integration test that self-skips without a Windows
-> host + Proxmox + Windows ISO.
+> stands up the single-DC `helloworld` lab on the Proxmox provider.
+> `Build-WorkLabImage` has been verified end-to-end on a real Windows host
+> (Win11 + ADK + WS2025 ISO → patched bootable ISO + manifest, idempotent
+> re-run). ADDS DSC promotion is **deferred to Phase 2.5** (guest
+> reachability on the isolated per-lab VNet is the open question). On
+> Phase 1: fully implemented Proxmox provider. Hyper-V/VMware remain
+> contract stubs.
 
 ## Quickstart
 
