@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least-privilege default token. Steps that need more should request it
+# explicitly at the job/step level.
+permissions:
+  contents: read
+
+# Supersede in-flight runs for the same ref so PR re-pushes don't waste
+# runner minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-test:
+    name: build+test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          path: output/RequiredModules
+          key: ${{ runner.os }}-reqmods-${{ hashFiles('RequiredModules.psd1') }}
+          restore-keys: |
+            ${{ runner.os }}-reqmods-
+
+      - name: Build + unit tests + analyzer
+        shell: pwsh
+        run: ./build.ps1 -Tasks build,test
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: output/testResults/*.xml
+          if-no-files-found: ignore
+
+  integration:
+    name: integration (gated)
+    runs-on: ubuntu-latest
+    # Each integration test self-skips when its gating env var is unset, so
+    # this job is a no-op until repo secrets are populated. The full set is
+    # wired below so it "just works" the moment any test's gating env arrives.
+    env:
+      # Proxmox connection (Phase 0 network + Phase 1 VM lifecycle)
+      WORKLAB_PROXMOX_TEST_HOST: ${{ secrets.WORKLAB_PROXMOX_TEST_HOST }}
+      WORKLAB_PROXMOX_TEST_TOKEN: ${{ secrets.WORKLAB_PROXMOX_TEST_TOKEN }}
+      WORKLAB_PROXMOX_TEST_PORT: ${{ secrets.WORKLAB_PROXMOX_TEST_PORT }}
+      WORKLAB_PROXMOX_TEST_NODE: ${{ secrets.WORKLAB_PROXMOX_TEST_NODE }}
+      WORKLAB_PROXMOX_TEST_ZONE: ${{ secrets.WORKLAB_PROXMOX_TEST_ZONE }}
+      WORKLAB_PROXMOX_TEST_DISK_STORAGE: ${{ secrets.WORKLAB_PROXMOX_TEST_DISK_STORAGE }}
+      WORKLAB_PROXMOX_TEST_ISO_STORAGE: ${{ secrets.WORKLAB_PROXMOX_TEST_ISO_STORAGE }}
+      # Phase 2 image pipeline (Windows + Windows ISO required)
+      WORKLAB_IMG_TEST_SOURCE_ISO: ${{ secrets.WORKLAB_IMG_TEST_SOURCE_ISO }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Integration tests
+        shell: pwsh
+        run: ./build.ps1 -Tasks integration
