@@ -100,7 +100,8 @@ Describe 'New-WorkLabProviderVm' {
             Mock Connect-WorkLabProxmox { 'S' }
             Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
             $script:newVmMachine = $null
-            Mock New-PveVm -RemoveParameterType 'Session' { $script:newVmMachine = $Machine }
+            $script:newVmCpu = $null
+            Mock New-PveVm -RemoveParameterType 'Session' { $script:newVmMachine = $Machine; $script:newVmCpu = $CpuType }
             $script:cfgKeys = $null
             Mock Set-PveVmConfig -RemoveParameterType 'Session' { $script:cfgKeys = @($AdditionalConfig.Keys) }
             $script:made = $false
@@ -111,6 +112,7 @@ Describe 'New-WorkLabProviderVm' {
             New-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n'; DiskStorage = 'lvm' } } `
                 -VmName lab-demo-dc01 -Bios ovmf -Confirm:$false | Out-Null
             $script:newVmMachine | Should -Be 'q35'
+            $script:newVmCpu | Should -Be 'x86-64-v2-AES'
             $script:cfgKeys | Should -Contain 'efidisk0'
         }
     }

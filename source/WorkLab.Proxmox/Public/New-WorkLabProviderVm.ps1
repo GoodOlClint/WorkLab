@@ -103,9 +103,15 @@ function New-WorkLabProviderVm {
         if ($OsType) { $newVm['OsType'] = $OsType }
         if ($Bios) { $newVm['Bios'] = $Bios }
         # OVMF (UEFI) requires the q35 machine type; pair them automatically so
-        # callers only have to ask for -Bios ovmf. Matches the proven Packer
-        # template (bios=ovmf, machine=pc-q35-*, ostype=win11).
-        if ($Bios -eq 'ovmf') { $newVm['Machine'] = 'q35' }
+        # callers only have to ask for -Bios ovmf. Also force a CPU model that
+        # exposes x86-64-v2 (POPCNT/SSE4.2): Windows 11 / Server 2025 WinPE
+        # triple-faults at the boot logo on the default kvm64 CPU (no POPCNT),
+        # which looks like a boot loop. All matches the proven Packer template
+        # (bios=ovmf, machine=pc-q35-*, ostype=win11, cpu=x86-64-v2-AES).
+        if ($Bios -eq 'ovmf') {
+            $newVm['Machine'] = 'q35'
+            $newVm['CpuType'] = 'x86-64-v2-AES'
+        }
         # Deliberately do NOT start as part of create. When an ISO is attached
         # the CD-ROM device + boot order must be in place BEFORE first power-on,
         # otherwise the VM boots with no bootable device and bootloops ("no
