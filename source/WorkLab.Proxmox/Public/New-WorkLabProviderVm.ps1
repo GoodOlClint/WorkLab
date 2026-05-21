@@ -109,10 +109,21 @@ function New-WorkLabProviderVm {
         New-PveVm @newVm
 
         if ($IsoName) {
+            # Attach the install ISO as a CD-ROM. Set ONLY ide2 — do not set the
+            # 'boot' key in the same (or a separate) Set-PveVmConfig call:
+            # PSProxmoxVE re-emits every disk device named in the boot-order
+            # string as a (malformed) drive parameter, so any call carrying
+            # 'boot' fails with "<dev>: unable to parse drive options" (filed
+            # upstream). Attaching ide2 alone makes Proxmox auto-append it to
+            # the existing boot order (e.g. 'order=virtio0;net0;ide2'). CD-last
+            # is exactly what an unattended Windows install wants: the empty OS
+            # disk is non-bootable so firmware falls through to the CD on first
+            # boot, and once Windows is installed the disk boots first on every
+            # subsequent reboot — no "Setup keeps rebooting into the CD" loop,
+            # and no need to detach the ISO mid-build.
             Set-PveVmConfig -Node $settings.Node -VmId $id.VmId -Session $session -Confirm:$false -ErrorAction Stop `
                 -AdditionalConfig @{
                     ide2 = "$($settings.IsoStorage):iso/$IsoName,media=cdrom"
-                    boot = 'order=ide2;scsi0;net0'
                 }
         }
 

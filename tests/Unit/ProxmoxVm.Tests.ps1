@@ -66,13 +66,14 @@ Describe 'New-WorkLabProviderVm' {
         }
     }
 
-    It 'attaches an ISO (requires IsoStorage) via Set-PveVmConfig' {
+    It 'attaches an ISO (requires IsoStorage) via Set-PveVmConfig with ide2 only (no boot key)' {
         InModuleScope WorkLab.Proxmox {
             Mock Connect-WorkLabProxmox { 'S' }
             Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
             Mock New-PveVm -RemoveParameterType 'Session' { }
             $script:cfg = 0
-            Mock Set-PveVmConfig -RemoveParameterType 'Session' { $script:cfg++ }
+            $script:cfgKeys = $null
+            Mock Set-PveVmConfig -RemoveParameterType 'Session' { $script:cfg++; $script:cfgKeys = @($AdditionalConfig.Keys) }
             $script:made = $false
             Mock Get-PveVm -RemoveParameterType 'Session' {
                 if ($script:made) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'stopped' } }
@@ -84,15 +85,21 @@ Describe 'New-WorkLabProviderVm' {
             $script:made = $false
             New-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n'; DiskStorage = 'd'; IsoStorage = 'local' } } -VmName lab-demo-dc01 -IsoName win.iso -Confirm:$false | Out-Null
             $script:cfg | Should -Be 1
+            # Workaround for the PSProxmoxVE Set-PveVmConfig bug: a 'boot' key
+            # makes it re-emit the disk devices in the order string as malformed
+            # drive params ("<dev>: unable to parse drive options"). We set ide2
+            # only and let Proxmox auto-append it to the boot order (CD-last,
+            # which is what unattended Windows install wants).
+            $script:cfgKeys | Should -Contain 'ide2'
+            $script:cfgKeys | Should -Not -Contain 'boot'
         }
     }
 
-    It 'configures the ISO + boot order BEFORE starting (no bootloop on empty disk)' {
+    It 'attaches the ISO BEFORE starting (no bootloop on empty disk)' {
         # Regression: when -Start and -IsoName were both passed, New-PveVm was
         # called with Start=$true and the VM powered on before Set-PveVmConfig
-        # attached the CD-ROM/boot order -> "no available device" bootloop.
-        # The CD-ROM + boot order must be set while the VM is still stopped,
-        # then the VM started explicitly.
+        # attached the CD-ROM -> "no available device" bootloop. The CD-ROM
+        # must be attached while the VM is still stopped, then started.
         InModuleScope WorkLab.Proxmox {
             Mock Connect-WorkLabProxmox { 'S' }
             Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
