@@ -59,6 +59,41 @@ Describe 'New-WorkLabProviderIso' {
         { New-WorkLabProviderIso -Context $script:Ctx -Path '/no/such/file.iso' -Confirm:$false } |
             Should -Throw -ExpectedMessage '*not found*'
     }
+
+    It 'forwards -TimeoutSeconds to Send-PveFile (default 1800, override honored)' {
+        InModuleScope WorkLab.Proxmox {
+            Mock Connect-WorkLabProxmox { 'S' }
+            Mock Get-PveStorageContent -RemoveParameterType 'Session' { @() }
+            $script:seenTimeout = $null
+            Mock Send-PveFile -RemoveParameterType 'Session' { $script:seenTimeout = $TimeoutSeconds }
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "wl-$([guid]::NewGuid().ToString('N')).iso"
+            Set-Content -Path $tmp -Value 'x'
+            try {
+                $ctx = @{ Options = @{ Server = 'p'; ApiToken = 't'; Node = 'pve1'; IsoStorage = 'local' } }
+
+                # Default: 1800s (30 min) for large ISO uploads.
+                New-WorkLabProviderIso -Context $ctx -Path $tmp -Confirm:$false | Out-Null
+                $script:seenTimeout | Should -Be 1800
+
+                # Override: caller can extend further.
+                New-WorkLabProviderIso -Context $ctx -Path $tmp -TimeoutSeconds 7200 -Confirm:$false | Out-Null
+                $script:seenTimeout | Should -Be 7200
+            }
+            finally { Remove-Item $tmp -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'forwards -TimeoutSeconds to Invoke-PveStorageDownload (URL path)' {
+        InModuleScope WorkLab.Proxmox {
+            Mock Connect-WorkLabProxmox { 'S' }
+            Mock Get-PveStorageContent -RemoveParameterType 'Session' { @() }
+            $script:seenTimeout = $null
+            Mock Invoke-PveStorageDownload -RemoveParameterType 'Session' { $script:seenTimeout = $TimeoutSeconds }
+            $ctx = @{ Options = @{ Server = 'p'; ApiToken = 't'; Node = 'pve1'; IsoStorage = 'local' } }
+            New-WorkLabProviderIso -Context $ctx -Url 'https://example/big.iso' -TimeoutSeconds 3600 -Confirm:$false | Out-Null
+            $script:seenTimeout | Should -Be 3600
+        }
+    }
 }
 
 Describe 'Get/Remove-WorkLabProviderIso' {

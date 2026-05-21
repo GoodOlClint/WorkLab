@@ -19,5 +19,5 @@
 
     # Provider runtime deps (resolved for build/test even though Phase 0
     # only wires Proxmox network ops).
-    PSProxmoxVE        = 'latest'
+    PSProxmoxVE        = '0.1.3'   # pin: requires the -TimeoutSeconds (PSProxmoxVE#59) + DiskSize normalize (#58) fixes
 }

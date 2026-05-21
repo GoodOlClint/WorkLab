@@ -21,6 +21,12 @@ function New-WorkLabProviderIso {
     .PARAMETER Name
         Stored file name. Defaults to the leaf of Url/Path.
 
+    .PARAMETER TimeoutSeconds
+        Per-call HTTP timeout for the upload/download (PSProxmoxVE 0.1.3+).
+        Default 1800 (30 min) — large Windows ISOs (~5 GB) routinely take
+        longer than the legacy 100s HttpClient default. Bump higher if
+        you're uploading multi-tens-of-GB images over a slow link.
+
     .EXAMPLE
         New-WorkLabProviderIso -Context $c -Url https://example/win.iso -Name win2025.iso
 
@@ -44,6 +50,9 @@ function New-WorkLabProviderIso {
 
         [Parameter()]
         [string]$Name,
+
+        [Parameter()]
+        [int]$TimeoutSeconds = 1800,
 
         [Parameter(ValueFromRemainingArguments)]
         $Rest
@@ -78,11 +87,12 @@ function New-WorkLabProviderIso {
         if ($PSCmdlet.ParameterSetName -eq 'ByUrl') {
             Invoke-PveStorageDownload -Node $settings.Node -Storage $settings.IsoStorage `
                 -Url $Url -Filename $fileName -ContentType 'iso' -Wait -Session $session `
-                -Confirm:$false -ErrorAction Stop
+                -TimeoutSeconds $TimeoutSeconds -Confirm:$false -ErrorAction Stop
         }
         else {
             Send-PveFile -Node $settings.Node -Storage $settings.IsoStorage -Path $Path `
-                -ContentType 'iso' -Wait -Session $session -Confirm:$false -ErrorAction Stop
+                -ContentType 'iso' -Wait -Session $session `
+                -TimeoutSeconds $TimeoutSeconds -Confirm:$false -ErrorAction Stop
         }
         $now = Get-WorkLabProxmoxIso -Settings $settings -Session $session -FileName $fileName | Select-Object -First 1
         return [pscustomobject]@{
