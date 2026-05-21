@@ -249,16 +249,58 @@ function Install-WorkLabOpenSsh {
         Write-Step 'sshd already running.' 'Skip'
     }
 
-    # Firewall rule (capability install typically creates 'OpenSSH-Server-In-TCP'; assert + create if missing).
+    # A fresh VM's NIC lands on the Public profile (Windows categorizes
+    # unidentified networks as Public). Move non-domain connection profiles to
+    # Private - the right category for a trusted lab network. Best-effort: the
+    # SSH rule below is set to all profiles regardless, so connectivity does
+    # not depend on this succeeding.
+    try {
+        $profiles = Get-NetConnectionProfile -ErrorAction Stop |
+            Where-Object { $_.NetworkCategory -eq 'Public' }
+        foreach ($p in $profiles) {
+            if ($PSCmdlet.ShouldProcess("interface $($p.InterfaceAlias)", 'Set-NetConnectionProfile -NetworkCategory Private')) {
+                Set-NetConnectionProfile -InterfaceIndex $p.InterfaceIndex -NetworkCategory Private -ErrorAction Stop
+                Write-Step "Set network profile to Private on '$($p.InterfaceAlias)'." 'OK'
+            }
+        }
+        if (-not $profiles) { Write-Step 'No Public network profiles to reclassify.' 'Skip' }
+    }
+    catch {
+        Write-Step "Could not reclassify network profile (continuing; SSH rule covers all profiles): $($_.Exception.Message)" 'Warn'
+    }
+
+    # Firewall: the OpenSSH capability install creates 'OpenSSH-Server-In-TCP'
+    # scoped to the Private profile ONLY. A fresh VM's NIC is almost always on
+    # the Public profile (Windows categorizes unidentified networks as Public),
+    # so that rule doesn't apply and TCP 22 is silently filtered ("Operation
+    # timed out", not "refused"). Force the rule to all profiles so SSH works
+    # regardless of how Windows categorized the network.
     $rule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue
-    if (-not $rule) {
-        if ($PSCmdlet.ShouldProcess('OpenSSH-Server-In-TCP', 'New-NetFirewallRule')) {
-            Write-Step 'Creating firewall rule OpenSSH-Server-In-TCP (TCP 22 inbound).' 'Action'
-            New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' `
-                -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -Enabled True | Out-Null
+    if ($rule) {
+        if ($PSCmdlet.ShouldProcess('OpenSSH-Server-In-TCP', 'Set-NetFirewallRule -Profile Any -Enabled True')) {
+            Set-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -Profile Any -Enabled True | Out-Null
+            Write-Step 'OpenSSH-Server-In-TCP firewall rule set to all profiles + enabled.' 'OK'
         }
     } else {
-        Write-Step 'Firewall rule OpenSSH-Server-In-TCP already present.' 'Skip'
+        if ($PSCmdlet.ShouldProcess('OpenSSH-Server-In-TCP', 'New-NetFirewallRule')) {
+            Write-Step 'Creating firewall rule OpenSSH-Server-In-TCP (TCP 22 inbound, all profiles).' 'Action'
+            New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' `
+                -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -Enabled True -Profile Any | Out-Null
+        }
+    }
+
+    # Allow inbound ICMPv4 echo so the host is pingable (Windows blocks it by
+    # default). Not required for SSH, but the WorkLab tooling uses ping for
+    # liveness/health checks, and it makes the VM far easier to diagnose.
+    $icmpRule = 'WorkLab-ICMPv4-Echo-In'
+    if (-not (Get-NetFirewallRule -Name $icmpRule -ErrorAction SilentlyContinue)) {
+        if ($PSCmdlet.ShouldProcess($icmpRule, 'New-NetFirewallRule (ICMPv4 echo)')) {
+            New-NetFirewallRule -Name $icmpRule -DisplayName 'WorkLab ICMPv4 Echo Request' `
+                -Direction Inbound -Protocol ICMPv4 -IcmpType 8 -Action Allow -Enabled True -Profile Any | Out-Null
+            Write-Step 'Enabled inbound ICMPv4 echo (ping).' 'OK'
+        }
+    } else {
+        Write-Step 'ICMPv4 echo rule already present.' 'Skip'
     }
 
     # Default shell + powershell subsystem = pwsh 7. Use the 8.3 short name
