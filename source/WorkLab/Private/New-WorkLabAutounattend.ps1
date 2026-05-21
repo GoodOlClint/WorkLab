@@ -49,7 +49,35 @@ function New-WorkLabAutounattend {
       <UILanguage>$Locale</UILanguage><UserLocale>$Locale</UserLocale>
     </component>
     <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-      <ImageInstall><OSImage><InstallFrom>$imageKey</InstallFrom></OSImage></ImageInstall>
+      <DiskConfiguration>
+        <WillShowUI>OnError</WillShowUI>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Active>true</Active>
+              <Format>NTFS</Format>
+              <Label>Windows</Label>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>$imageKey</InstallFrom>
+          <InstallTo><DiskID>0</DiskID><PartitionID>1</PartitionID></InstallTo>
+        </OSImage>
+      </ImageInstall>
       <UserData><AcceptEula>true</AcceptEula></UserData>
     </component>
   </settings>

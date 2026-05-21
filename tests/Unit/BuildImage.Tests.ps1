@@ -37,6 +37,12 @@ Describe 'New-WorkLabAutounattend' {
                 $xml | Should -BeLike '*<AutoLogon>*'
                 # No guest-agent install command when -GuestAgentMsiPath omitted
                 $xml | Should -Not -BeLike '*msiexec*qemu-ga*'
+                # Disk must be wiped + partitioned + targeted, or Setup loops with
+                # no bootable disk (legacy BIOS / MBR: one active primary NTFS).
+                $xml | Should -BeLike '*<DiskConfiguration>*'
+                $xml | Should -BeLike '*<WillWipeDisk>true</WillWipeDisk>*'
+                $xml | Should -BeLike '*<Active>true</Active>*'
+                $xml | Should -BeLike '*<InstallTo><DiskID>0</DiskID><PartitionID>1</PartitionID></InstallTo>*'
             }
             finally { Remove-Item $out -ErrorAction SilentlyContinue }
         }
