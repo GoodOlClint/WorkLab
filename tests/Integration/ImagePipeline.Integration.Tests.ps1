@@ -61,7 +61,11 @@ Describe 'Image pipeline + single-DC lab (gated)' -Skip:(-not $script:ImgGate) {
     }
 
     It 'builds a patched image into the cache' {
+        # WS2025 Standard GVLK (public) so the unattended install doesn't stop at
+        # the product-key screen; override via WORKLAB_IMG_PRODUCT_KEY.
+        $productKey = if ($env:WORKLAB_IMG_PRODUCT_KEY) { $env:WORKLAB_IMG_PRODUCT_KEY } else { 'TVRH6-WHNXV-R9WG3-9XRFY-MY832' }
         $img = Build-WorkLabImage -Name $script:Img -SourceIso $env:WORKLAB_IMG_TEST_SOURCE_ISO `
+            -ProductKey $productKey `
             -AdminCredential $script:Cred -Confirm:$false
         Test-Path $img.IsoPath | Should -BeTrue
         $img.Manifest.isoSha256 | Should -Match '^[0-9a-f]{64}$'

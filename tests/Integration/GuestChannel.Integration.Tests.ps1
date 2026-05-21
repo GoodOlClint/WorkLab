@@ -69,9 +69,14 @@ Describe 'Phase 2.5 guest channel end-to-end (gated)' -Skip:(-not $script:GcGate
     }
 
     It 'builds an image with virtio drivers + qemu-ga staged' {
+        # WS2025 Standard GVLK (public Microsoft KMS client setup key) so the
+        # unattended install doesn't stop at the product-key screen. Override
+        # via WORKLAB_IMG_PRODUCT_KEY for a different edition.
+        $productKey = if ($env:WORKLAB_IMG_PRODUCT_KEY) { $env:WORKLAB_IMG_PRODUCT_KEY } else { 'TVRH6-WHNXV-R9WG3-9XRFY-MY832' }
         $img = Build-WorkLabImage -Name $script:Img `
             -SourceIso $env:WORKLAB_IMG_TEST_SOURCE_ISO `
             -VirtioWinIso $env:WORKLAB_VIRTIO_ISO `
+            -ProductKey $productKey `
             -AdminCredential $script:Cred -Confirm:$false
         Test-Path $img.IsoPath | Should -BeTrue
         $img.Manifest.virtioSha256 | Should -Match '^[0-9a-f]{64}$'

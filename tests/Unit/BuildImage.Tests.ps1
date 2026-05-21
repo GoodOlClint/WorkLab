@@ -58,6 +58,23 @@ Describe 'New-WorkLabAutounattend' {
         }
     }
 
+    It 'embeds a ProductKey block when -ProductKey is supplied (and omits it otherwise)' {
+        InModuleScope WorkLab {
+            $ss = ConvertTo-SecureString 'P@ss' -AsPlainText -Force
+            $out = Join-Path ([IO.Path]::GetTempPath()) "wl-aupk-$([guid]::NewGuid().ToString('N')).xml"
+            try {
+                New-WorkLabAutounattend -Edition 1 -AdminPassword $ss -ProductKey 'TVRH6-WHNXV-R9WG3-9XRFY-MY832' -OutFile $out | Out-Null
+                $xml = Get-Content -LiteralPath $out -Raw
+                { [xml]$xml } | Should -Not -Throw
+                $xml | Should -BeLike '*<ProductKey><Key>TVRH6-WHNXV-R9WG3-9XRFY-MY832</Key>*'
+
+                New-WorkLabAutounattend -Edition 1 -AdminPassword $ss -OutFile $out | Out-Null
+                (Get-Content -LiteralPath $out -Raw) | Should -Not -BeLike '*<ProductKey>*'
+            }
+            finally { Remove-Item $out -ErrorAction SilentlyContinue }
+        }
+    }
+
     It 'emits a legacy-BIOS MBR layout when -Firmware Bios' {
         InModuleScope WorkLab {
             $ss = ConvertTo-SecureString 'P@ss' -AsPlainText -Force

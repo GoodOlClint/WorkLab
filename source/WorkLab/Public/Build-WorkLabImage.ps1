@@ -85,6 +85,9 @@ function Build-WorkLabImage {
         [string]$VirtioWinIso,
 
         [Parameter()]
+        [string]$ProductKey,
+
+        [Parameter()]
         [switch]$Force
     )
 
@@ -186,6 +189,7 @@ function Build-WorkLabImage {
             OutFile       = (Join-Path $workDir 'autounattend.xml')
         }
         if ($virtio) { $auaParams['GuestAgentMsiPath'] = $inGuestAgentPath }
+        if ($ProductKey) { $auaParams['ProductKey'] = $ProductKey }
         New-WorkLabAutounattend @auaParams | Out-Null
 
         New-WorkLabBootableIso -WorkDir $workDir -IsoPath $isoOut | Out-Null

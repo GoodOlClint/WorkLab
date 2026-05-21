@@ -17,6 +17,7 @@ function New-WorkLabAutounattend {
         [Parameter()][string]$Locale = 'en-US',
         [Parameter()][string]$GuestAgentMsiPath,
         [Parameter()][ValidateSet('Uefi', 'Bios')][string]$Firmware = 'Uefi',
+        [Parameter()][string]$ProductKey,
         [Parameter(Mandatory)][string]$OutFile
     )
 
@@ -29,6 +30,15 @@ function New-WorkLabAutounattend {
     else {
         "<MetaData wcm:action=`"add`"><Key>/IMAGE/NAME</Key><Value>$Edition</Value></MetaData>"
     }
+
+    # Product key (windowsPE UserData). Volume/eval media stop at an interactive
+    # "enter product key" screen unless a key is supplied; a KMS client setup
+    # key (Microsoft-published, edition-specific) lets Setup proceed unattended
+    # without activating. Omitted when no key is given.
+    $productKeyXml = if ($ProductKey) {
+        "<ProductKey><Key>$ProductKey</Key><WillShowUI>OnError</WillShowUI></ProductKey>"
+    }
+    else { '' }
 
     # Build FirstLogonCommands: install the guest agent (when supplied) BEFORE
     # sysprep so the agent service is registered and survives generalize. The
@@ -103,7 +113,7 @@ $diskConfig
           $installTo
         </OSImage>
       </ImageInstall>
-      <UserData><AcceptEula>true</AcceptEula></UserData>
+      <UserData>$productKeyXml<AcceptEula>true</AcceptEula></UserData>
     </component>
   </settings>
   <settings pass="oobeSystem">
