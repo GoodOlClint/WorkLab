@@ -197,6 +197,10 @@ Describe 'Build-WorkLabImage pipeline (seams mocked)' {
                 $script:wimAdds = 0
                 Mock Add-WorkLabWimContent { $script:wimAdds++ }
                 Mock Dismount-WorkLabWim { }
+                # boot.wim has two images (1=WinPE, 2=Setup); virtio drivers go
+                # into each so Setup can see the virtio0 disk.
+                $script:bootIndexCalls = 0
+                Mock Get-WorkLabWimIndex { $script:bootIndexCalls++; @(1, 2) }
                 Mock New-WorkLabBootableIso { param($WorkDir, $IsoPath) Set-Content -LiteralPath $IsoPath -Value 'iso'; $IsoPath }
 
                 $script:virtioMounts = 0
@@ -228,8 +232,11 @@ Describe 'Build-WorkLabImage pipeline (seams mocked)' {
                 $script:virtioMounts | Should -Be 1
                 $script:virtioDismounts | Should -Be 1
                 $script:msiCopies | Should -Be 1
-                # Two Add-WorkLabWimContent calls: virtio drivers + user(empty) drivers/updates.
-                $script:wimAdds | Should -Be 2
+                # Add-WorkLabWimContent calls: install.wim gets virtio + user
+                # drivers (2), then boot.wim gets virtio drivers per image (2:
+                # WinPE + Setup) = 4 total. boot.wim indices were enumerated once.
+                $script:wimAdds | Should -Be 4
+                $script:bootIndexCalls | Should -Be 1
                 # Autounattend received the in-guest agent path.
                 $script:auaGuestAgent | Should -Be 'C:\Windows\Setup\Files\qemu-ga.msi'
             }

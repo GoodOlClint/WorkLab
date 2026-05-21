@@ -157,6 +157,28 @@ function Build-WorkLabImage {
             throw
         }
 
+        # Inject virtio storage drivers into boot.wim too. install.wim drivers
+        # only help the installed OS; Windows Setup itself runs from boot.wim
+        # (WinPE), and without virtio storage there it cannot see the virtio0
+        # disk to install onto — Setup crashes with 0xc00000e9 (boot I/O error)
+        # / "no drives found". Service every boot.wim image (index 1 = WinPE,
+        # index 2 = Windows Setup). Drivers only — no MSI/autounattend here.
+        if ($virtio) {
+            $bootWim = Join-Path $workDir 'sources/boot.wim'
+            $bootMountDir = Join-Path $workDir 'bootmount'
+            foreach ($bootIndex in (Get-WorkLabWimIndex -WimPath $bootWim)) {
+                Mount-WorkLabWim -WimPath $bootWim -Edition "$bootIndex" -MountDir $bootMountDir | Out-Null
+                try {
+                    Add-WorkLabWimContent -MountDir $bootMountDir -DriverPath $virtio.DriverPath
+                    Dismount-WorkLabWim -MountDir $bootMountDir
+                }
+                catch {
+                    Dismount-WorkLabWim -MountDir $bootMountDir -Discard
+                    throw
+                }
+            }
+        }
+
         $auaParams = @{
             Edition       = $Edition
             AdminPassword = $cred.Password
