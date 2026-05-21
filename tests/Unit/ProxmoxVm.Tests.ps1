@@ -86,6 +86,35 @@ Describe 'New-WorkLabProviderVm' {
             $script:cfg | Should -Be 1
         }
     }
+
+    It 'configures the ISO + boot order BEFORE starting (no bootloop on empty disk)' {
+        # Regression: when -Start and -IsoName were both passed, New-PveVm was
+        # called with Start=$true and the VM powered on before Set-PveVmConfig
+        # attached the CD-ROM/boot order -> "no available device" bootloop.
+        # The CD-ROM + boot order must be set while the VM is still stopped,
+        # then the VM started explicitly.
+        InModuleScope WorkLab.Proxmox {
+            Mock Connect-WorkLabProxmox { 'S' }
+            Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
+            $script:order = [System.Collections.Generic.List[string]]::new()
+            Mock New-PveVm -RemoveParameterType 'Session' {
+                # New-PveVm must NOT receive Start — start is a separate step now.
+                if ($PSBoundParameters.ContainsKey('Start')) { $script:order.Add('New-PveVm+Start') }
+                else { $script:order.Add('New-PveVm') }
+            }
+            Mock Set-PveVmConfig -RemoveParameterType 'Session' { $script:order.Add('Set-PveVmConfig') }
+            Mock Start-PveVm -RemoveParameterType 'Session' { $script:order.Add('Start-PveVm') }
+            $script:made = $false
+            Mock Get-PveVm -RemoveParameterType 'Session' {
+                if ($script:made) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'running' } }
+                else { $script:made = $true }
+            }
+            New-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n'; DiskStorage = 'd'; IsoStorage = 'local' } } `
+                -VmName lab-demo-dc01 -IsoName win.iso -Start -Confirm:$false | Out-Null
+
+            $script:order | Should -Be @('New-PveVm', 'Set-PveVmConfig', 'Start-PveVm')
+        }
+    }
 }
 
 Describe 'Get-WorkLabProviderVm' {

@@ -102,7 +102,10 @@ function New-WorkLabProviderVm {
         }
         if ($OsType) { $newVm['OsType'] = $OsType }
         if ($Bios) { $newVm['Bios'] = $Bios }
-        if ($Start) { $newVm['Start'] = $true }
+        # Deliberately do NOT start as part of create. When an ISO is attached
+        # the CD-ROM device + boot order must be in place BEFORE first power-on,
+        # otherwise the VM boots with no bootable device and bootloops ("no
+        # available device"). Configure fully, then start explicitly below.
         New-PveVm @newVm
 
         if ($IsoName) {
@@ -111,6 +114,10 @@ function New-WorkLabProviderVm {
                     ide2 = "$($settings.IsoStorage):iso/$IsoName,media=cdrom"
                     boot = 'order=ide2;scsi0;net0'
                 }
+        }
+
+        if ($Start) {
+            Start-PveVm -Node $settings.Node -VmId $id.VmId -Wait -Session $session -Confirm:$false -ErrorAction Stop
         }
 
         $created = (Resolve-WorkLabProxmoxVm -Settings $settings -Session $session -Identity $id).Vm
