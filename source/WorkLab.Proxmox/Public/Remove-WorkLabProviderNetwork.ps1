@@ -43,7 +43,7 @@ function Remove-WorkLabProviderNetwork {
 
     if ($PSCmdlet.ShouldProcess($id.Vnet, 'Remove-PveSdnVnet')) {
         Remove-PveSdnVnet -Vnet $id.Vnet -Session $session -Confirm:$false -ErrorAction Stop
-        Invoke-PveSdnApply -Session $session -Confirm:$false -ErrorAction Stop
+        Invoke-WorkLabProxmoxSdnApply -Session $session
         return [pscustomobject]@{ Name = $id.Vnet; Removed = $true }
     }
 }

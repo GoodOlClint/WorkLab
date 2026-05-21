@@ -155,3 +155,47 @@ Describe 'Get-WorkLabProxmoxDiskSizeGB' {
         }
     }
 }
+
+Describe 'Invoke-WorkLabProxmoxSdnApply (transient ifreload retry)' {
+    It 'returns on first success without retrying' {
+        InModuleScope WorkLab.Proxmox {
+            $script:calls = 0
+            Mock Invoke-PveSdnApply -RemoveParameterType 'Session' { $script:calls++ }
+            Invoke-WorkLabProxmoxSdnApply -Session 'S' -DelaySeconds 0
+            $script:calls | Should -Be 1
+        }
+    }
+    It 'retries the transient ifreload exit-89 flake, then succeeds' {
+        InModuleScope WorkLab.Proxmox {
+            $script:calls = 0
+            Mock Invoke-PveSdnApply -RemoveParameterType 'Session' {
+                $script:calls++
+                if ($script:calls -lt 2) { throw "command 'ifreload -a' failed: exit code 89" }
+            }
+            Invoke-WorkLabProxmoxSdnApply -Session 'S' -DelaySeconds 0
+            $script:calls | Should -Be 2
+        }
+    }
+    It 'gives up after MaxAttempts on a persistent transient failure' {
+        InModuleScope WorkLab.Proxmox {
+            $script:calls = 0
+            Mock Invoke-PveSdnApply -RemoveParameterType 'Session' {
+                $script:calls++; throw "command 'ifreload -a' failed: exit code 89"
+            }
+            { Invoke-WorkLabProxmoxSdnApply -Session 'S' -MaxAttempts 3 -DelaySeconds 0 } |
+                Should -Throw -ExpectedMessage '*exit code 89*'
+            $script:calls | Should -Be 3
+        }
+    }
+    It 'does NOT retry a non-transient SDN error' {
+        InModuleScope WorkLab.Proxmox {
+            $script:calls = 0
+            Mock Invoke-PveSdnApply -RemoveParameterType 'Session' {
+                $script:calls++; throw 'zone "labzone" does not exist'
+            }
+            { Invoke-WorkLabProxmoxSdnApply -Session 'S' -DelaySeconds 0 } |
+                Should -Throw -ExpectedMessage '*does not exist*'
+            $script:calls | Should -Be 1
+        }
+    }
+}

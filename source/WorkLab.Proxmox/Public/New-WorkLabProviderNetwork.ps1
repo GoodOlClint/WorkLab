@@ -52,7 +52,7 @@ function New-WorkLabProviderNetwork {
 
     if ($PSCmdlet.ShouldProcess("$($id.Vnet) (zone $($settings.Zone), VLAN $($id.Tag))", 'New-PveSdnVnet')) {
         New-PveSdnVnet -Vnet $id.Vnet -Zone $settings.Zone -Tag $id.Tag -Alias "worklab/$($settings.Slug)" -Session $session -ErrorAction Stop
-        Invoke-PveSdnApply -Session $session -Confirm:$false -ErrorAction Stop
+        Invoke-WorkLabProxmoxSdnApply -Session $session
         $created = Get-PveSdnVnet -Vnet $id.Vnet -Session $session -ErrorAction SilentlyContinue
         return [pscustomobject]@{
             Name     = $id.Vnet
