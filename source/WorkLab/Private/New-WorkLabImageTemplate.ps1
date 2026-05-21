@@ -44,8 +44,11 @@ function New-WorkLabImageTemplate {
             -Arguments @{ Context = $ctx } | Out-Null
         Invoke-WorkLabProviderCommand -Provider $Provider -Verb 'New' -Noun 'Iso' `
             -Arguments @{ Context = $ctx; Path = $image.IsoPath } | Out-Null
+        # Build the install VM as OVMF/UEFI + win11 (matches the proven Packer
+        # template). The provider pairs ovmf with q35 + an efidisk0 and the
+        # baked autounattend uses a matching UEFI/GPT disk layout.
         Invoke-WorkLabProviderCommand -Provider $Provider -Verb 'New' -Noun 'Vm' `
-            -Arguments @{ Context = $ctx; VmName = $tplName; IsoName = $isoLeaf; Start = $true } | Out-Null
+            -Arguments @{ Context = $ctx; VmName = $tplName; IsoName = $isoLeaf; Bios = 'ovmf'; OsType = 'win11'; Start = $true } | Out-Null
 
         Wait-WorkLabProviderVmStopped -Provider $Provider -Context $ctx -VmName $tplName
 

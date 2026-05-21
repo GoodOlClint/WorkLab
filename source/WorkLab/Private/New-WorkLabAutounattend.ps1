@@ -16,6 +16,7 @@ function New-WorkLabAutounattend {
         [Parameter(Mandatory)][securestring]$AdminPassword,
         [Parameter()][string]$Locale = 'en-US',
         [Parameter()][string]$GuestAgentMsiPath,
+        [Parameter()][ValidateSet('Uefi', 'Bios')][string]$Firmware = 'Uefi',
         [Parameter(Mandatory)][string]$OutFile
     )
 
@@ -39,6 +40,52 @@ function New-WorkLabAutounattend {
     $cmds.Add(('        <SynchronousCommand wcm:action="add"><Order>{0}</Order><CommandLine>%WINDIR%\System32\Sysprep\Sysprep.exe /generalize /oobe /shutdown /quiet</CommandLine><Description>WorkLab sysprep and shutdown (build-complete signal)</Description></SynchronousCommand>' -f ($cmds.Count + 1)))
     $firstLogon = $cmds -join "`n"
 
+    # Disk layout must match the VM firmware. UEFI needs a GPT layout (EFI
+    # System Partition + MSR + Windows); legacy BIOS needs a single active
+    # primary (MBR). A mismatch leaves the installed disk non-bootable and the
+    # VM PXE/CD-loops. WorkLab VMs are OVMF/UEFI by default (see
+    # New-WorkLabProviderVm), so 'Uefi' is the default.
+    if ($Firmware -eq 'Uefi') {
+        $diskConfig = @'
+      <DiskConfiguration>
+        <WillShowUI>OnError</WillShowUI>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add"><Order>1</Order><Type>EFI</Type><Size>260</Size></CreatePartition>
+            <CreatePartition wcm:action="add"><Order>2</Order><Type>MSR</Type><Size>16</Size></CreatePartition>
+            <CreatePartition wcm:action="add"><Order>3</Order><Type>Primary</Type><Extend>true</Extend></CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Format>FAT32</Format><Label>System</Label></ModifyPartition>
+            <ModifyPartition wcm:action="add"><Order>2</Order><PartitionID>2</PartitionID></ModifyPartition>
+            <ModifyPartition wcm:action="add"><Order>3</Order><PartitionID>3</PartitionID><Format>NTFS</Format><Label>Windows</Label></ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+'@
+        $installTo = '<InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo>'
+    }
+    else {
+        $diskConfig = @'
+      <DiskConfiguration>
+        <WillShowUI>OnError</WillShowUI>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add"><Order>1</Order><Type>Primary</Type><Extend>true</Extend></CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Active>true</Active><Format>NTFS</Format><Label>Windows</Label></ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+'@
+        $installTo = '<InstallTo><DiskID>0</DiskID><PartitionID>1</PartitionID></InstallTo>'
+    }
+
     $xml = @"
 <?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
@@ -49,33 +96,11 @@ function New-WorkLabAutounattend {
       <UILanguage>$Locale</UILanguage><UserLocale>$Locale</UserLocale>
     </component>
     <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-      <DiskConfiguration>
-        <WillShowUI>OnError</WillShowUI>
-        <Disk wcm:action="add">
-          <DiskID>0</DiskID>
-          <WillWipeDisk>true</WillWipeDisk>
-          <CreatePartitions>
-            <CreatePartition wcm:action="add">
-              <Order>1</Order>
-              <Type>Primary</Type>
-              <Extend>true</Extend>
-            </CreatePartition>
-          </CreatePartitions>
-          <ModifyPartitions>
-            <ModifyPartition wcm:action="add">
-              <Order>1</Order>
-              <PartitionID>1</PartitionID>
-              <Active>true</Active>
-              <Format>NTFS</Format>
-              <Label>Windows</Label>
-            </ModifyPartition>
-          </ModifyPartitions>
-        </Disk>
-      </DiskConfiguration>
+$diskConfig
       <ImageInstall>
         <OSImage>
           <InstallFrom>$imageKey</InstallFrom>
-          <InstallTo><DiskID>0</DiskID><PartitionID>1</PartitionID></InstallTo>
+          $installTo
         </OSImage>
       </ImageInstall>
       <UserData><AcceptEula>true</AcceptEula></UserData>

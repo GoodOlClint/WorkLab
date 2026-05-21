@@ -37,12 +37,33 @@ Describe 'New-WorkLabAutounattend' {
                 $xml | Should -BeLike '*<AutoLogon>*'
                 # No guest-agent install command when -GuestAgentMsiPath omitted
                 $xml | Should -Not -BeLike '*msiexec*qemu-ga*'
-                # Disk must be wiped + partitioned + targeted, or Setup loops with
-                # no bootable disk (legacy BIOS / MBR: one active primary NTFS).
+                # Disk must be wiped + partitioned + targeted, or Setup loops
+                # with no bootable disk. Default firmware is UEFI: GPT layout
+                # with EFI + MSR + Windows, install to partition 3.
                 $xml | Should -BeLike '*<DiskConfiguration>*'
                 $xml | Should -BeLike '*<WillWipeDisk>true</WillWipeDisk>*'
+                $xml | Should -BeLike '*<Type>EFI</Type>*'
+                $xml | Should -BeLike '*<Type>MSR</Type>*'
+                $xml | Should -BeLike '*<InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo>*'
+                # UEFI has no active-partition concept.
+                $xml | Should -Not -BeLike '*<Active>true</Active>*'
+            }
+            finally { Remove-Item $out -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'emits a legacy-BIOS MBR layout when -Firmware Bios' {
+        InModuleScope WorkLab {
+            $ss = ConvertTo-SecureString 'P@ss' -AsPlainText -Force
+            $out = Join-Path ([IO.Path]::GetTempPath()) "wl-aubios-$([guid]::NewGuid().ToString('N')).xml"
+            try {
+                New-WorkLabAutounattend -Edition 1 -AdminPassword $ss -Firmware Bios -OutFile $out | Out-Null
+                $xml = Get-Content -LiteralPath $out -Raw
+                # MBR: single active primary, install to partition 1, no EFI/MSR.
                 $xml | Should -BeLike '*<Active>true</Active>*'
                 $xml | Should -BeLike '*<InstallTo><DiskID>0</DiskID><PartitionID>1</PartitionID></InstallTo>*'
+                $xml | Should -Not -BeLike '*<Type>EFI</Type>*'
+                $xml | Should -Not -BeLike '*<Type>MSR</Type>*'
             }
             finally { Remove-Item $out -ErrorAction SilentlyContinue }
         }

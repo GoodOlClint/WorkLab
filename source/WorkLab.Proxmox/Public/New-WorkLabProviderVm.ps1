@@ -102,11 +102,28 @@ function New-WorkLabProviderVm {
         }
         if ($OsType) { $newVm['OsType'] = $OsType }
         if ($Bios) { $newVm['Bios'] = $Bios }
+        # OVMF (UEFI) requires the q35 machine type; pair them automatically so
+        # callers only have to ask for -Bios ovmf. Matches the proven Packer
+        # template (bios=ovmf, machine=pc-q35-*, ostype=win11).
+        if ($Bios -eq 'ovmf') { $newVm['Machine'] = 'q35' }
         # Deliberately do NOT start as part of create. When an ISO is attached
         # the CD-ROM device + boot order must be in place BEFORE first power-on,
         # otherwise the VM boots with no bootable device and bootloops ("no
         # available device"). Configure fully, then start explicitly below.
         New-PveVm @newVm
+
+        # OVMF needs an EFI vars disk (NVRAM) or the VM has no UEFI firmware
+        # store and can't persist/boot a UEFI OS. New-PveVm doesn't create one,
+        # so add it here. efitype=4m is the modern 4MB OVMF; pre-enrolled-keys=0
+        # leaves Secure Boot unenrolled so unattended install media isn't
+        # signature-gated. (Verified the <storage>:1 create syntax allocates a
+        # 4MB efidisk on this cluster.)
+        if ($Bios -eq 'ovmf') {
+            Set-PveVmConfig -Node $settings.Node -VmId $id.VmId -Session $session -Confirm:$false -ErrorAction Stop `
+                -AdditionalConfig @{
+                    efidisk0 = "$($settings.DiskStorage):1,efitype=4m,pre-enrolled-keys=0"
+                }
+        }
 
         if ($IsoName) {
             # Attach the install ISO as a CD-ROM. Set ONLY ide2 — do not set the

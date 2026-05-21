@@ -95,6 +95,26 @@ Describe 'New-WorkLabProviderVm' {
         }
     }
 
+    It 'adds an efidisk0 + q35 machine when -Bios ovmf' {
+        InModuleScope WorkLab.Proxmox {
+            Mock Connect-WorkLabProxmox { 'S' }
+            Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
+            $script:newVmMachine = $null
+            Mock New-PveVm -RemoveParameterType 'Session' { $script:newVmMachine = $Machine }
+            $script:cfgKeys = $null
+            Mock Set-PveVmConfig -RemoveParameterType 'Session' { $script:cfgKeys = @($AdditionalConfig.Keys) }
+            $script:made = $false
+            Mock Get-PveVm -RemoveParameterType 'Session' {
+                if ($script:made) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'stopped' } }
+                else { $script:made = $true }
+            }
+            New-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n'; DiskStorage = 'lvm' } } `
+                -VmName lab-demo-dc01 -Bios ovmf -Confirm:$false | Out-Null
+            $script:newVmMachine | Should -Be 'q35'
+            $script:cfgKeys | Should -Contain 'efidisk0'
+        }
+    }
+
     It 'attaches the ISO BEFORE starting (no bootloop on empty disk)' {
         # Regression: when -Start and -IsoName were both passed, New-PveVm was
         # called with Start=$true and the VM powered on before Set-PveVmConfig
