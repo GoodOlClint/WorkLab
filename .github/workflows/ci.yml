@@ -40,14 +40,25 @@ jobs:
         uses: actions/cache@v5
         with:
           path: output/RequiredModules
-          key: ${{ runner.os }}-reqmods-${{ hashFiles('RequiredModules.psd1') }}
+          # The 'v2' epoch busts every pre-existing cache. Earlier runs (while
+          # build.ps1 still had the directory-only presence check + the
+          # restore-keys fallback) baked a mixed-version output/RequiredModules
+          # under this key — same version dir, corrupted content — which the
+          # self-heal can't detect. Bump the epoch whenever the cached layout
+          # is known-polluted and needs a clean rebuild.
+          key: ${{ runner.os }}-reqmods-v2-${{ hashFiles('RequiredModules.psd1') }}
 
       - name: Build + unit tests + analyzer
         shell: pwsh
         run: ./build.ps1 -Tasks build,test
 
       - name: Publish test results
+        # Convenience artifact, not a correctness gate. The artifact service
+        # occasionally hiccups (a v7 upload on windows-latest stalled after
+        # validation with no error and red-X'd an otherwise-green build), so
+        # never let it fail the job.
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ matrix.os }}
