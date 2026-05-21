@@ -73,12 +73,33 @@ function Resolve-WorkLabBuildDependency {
         $spec = $required[$name]
         $version = if ($spec -is [hashtable]) { $spec.Version } else { $spec }
 
-        $alreadyThere = Get-ChildItem -Path $script:RequiredModulesPath -Directory -ErrorAction SilentlyContinue |
-            Where-Object Name -EQ $name
+        $moduleDir = Join-Path $script:RequiredModulesPath $name
+        $pinned    = $version -and $version -ne 'latest'
 
-        if ($alreadyThere) {
-            Write-Host "  [skip] $name already resolved" -ForegroundColor DarkGray
+        # Presence check has to be version-aware. CI's actions/cache restores
+        # an older output/RequiredModules via restore-keys fallback when the
+        # manifest hash changes (a pin bump). A directory-only check would
+        # then skip Save-Module and import the stale module. For pinned
+        # versions, confirm the exact version subdir; for 'latest', accept
+        # any subdir.
+        $satisfied = if ($pinned) {
+            Test-Path -LiteralPath (Join-Path $moduleDir $version)
+        } else {
+            Test-Path -LiteralPath $moduleDir
+        }
+
+        if ($satisfied) {
+            Write-Host "  [skip] $name $version already resolved" -ForegroundColor DarkGray
             continue
+        }
+
+        # Stale older version present (pin bump after a cache restore): wipe
+        # the module dir so Save-Module starts clean. Otherwise PowerShellGet
+        # leaves the old version dir in place and our presence check stays
+        # stuck on the wrong version forever.
+        if ($pinned -and (Test-Path -LiteralPath $moduleDir)) {
+            Write-Host "  [clean] $name (stale version present; expected $version)" -ForegroundColor Yellow
+            Remove-Item -LiteralPath $moduleDir -Recurse -Force
         }
 
         Write-Host "  [save] $name $version" -ForegroundColor Cyan
@@ -90,7 +111,7 @@ function Resolve-WorkLabBuildDependency {
             ErrorAction     = 'Stop'
             AcceptLicense   = $true
         }
-        if ($version -and $version -ne 'latest') {
+        if ($pinned) {
             $saveParams['RequiredVersion'] = $version
         }
         Save-Module @saveParams

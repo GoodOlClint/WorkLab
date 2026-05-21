@@ -26,15 +26,21 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Cache build dependencies
-        uses: actions/cache@v4
+        # Exact-key only: no restore-keys fallback. A pin bump in
+        # RequiredModules.psd1 changes the hash, and falling back to an older
+        # cache silently restored a stale output/RequiredModules whose
+        # version subdirs made build.ps1's presence check skip Save-Module
+        # entirely — imported the wrong version of pinned modules (e.g.
+        # PSProxmoxVE 0.1.1 instead of 0.1.3) and tripped
+        # ParameterBindingException at test time. build.ps1 now self-heals
+        # mismatched pins, but losing the fallback is the structural fix.
+        uses: actions/cache@v5
         with:
           path: output/RequiredModules
           key: ${{ runner.os }}-reqmods-${{ hashFiles('RequiredModules.psd1') }}
-          restore-keys: |
-            ${{ runner.os }}-reqmods-
 
       - name: Build + unit tests + analyzer
         shell: pwsh
@@ -42,7 +48,7 @@ jobs:
 
       - name: Publish test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ matrix.os }}
           path: output/testResults/*.xml
@@ -66,7 +72,7 @@ jobs:
       # Phase 2 image pipeline (Windows + Windows ISO required)
       WORKLAB_IMG_TEST_SOURCE_ISO: ${{ secrets.WORKLAB_IMG_TEST_SOURCE_ISO }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Integration tests
         shell: pwsh
         run: ./build.ps1 -Tasks integration
