@@ -50,7 +50,29 @@ task build {
 task analyze {
     Import-Module PSScriptAnalyzer -ErrorAction Stop
     $settings = Join-Path $script:RepoRoot '.build/ScriptAnalyzerSettings.psd1'
-    $results = Invoke-ScriptAnalyzer -Path $script:SourceRoot -Recurse -Settings $settings
+
+    # Invoke-ScriptAnalyzer intermittently throws a NullReferenceException on
+    # the windows-latest runner ("Object reference not set to an instance of
+    # an object") for the SAME source that analyzes clean on other runs and on
+    # Ubuntu — a known flaky PSSA-on-Windows crash, not a finding. Retry a few
+    # times; only a genuine finding (non-empty $results with Error severity) or
+    # a persistent crash should fail the task.
+    $attempts = 3
+    $results = $null
+    for ($i = 1; $i -le $attempts; $i++) {
+        try {
+            $results = Invoke-ScriptAnalyzer -Path $script:SourceRoot -Recurse -Settings $settings -ErrorAction Stop
+            break
+        }
+        catch {
+            if ($i -eq $attempts) {
+                throw "PSScriptAnalyzer crashed $attempts times (last: $($_.Exception.Message)). This is the flaky PSSA-on-Windows NRE if the message is a NullReferenceException; re-run the job."
+            }
+            Write-Build Yellow "  analyzer crashed (attempt $i/$attempts): $($_.Exception.Message) — retrying"
+            Start-Sleep -Seconds 2
+        }
+    }
+
     if ($results) {
         $results | Format-Table -AutoSize | Out-String | Write-Build Yellow
         $errors = @($results | Where-Object Severity -EQ 'Error')
