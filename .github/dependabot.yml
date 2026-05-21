@@ -1,0 +1,32 @@
+# Dependabot configuration.
+#
+# Tracks the GitHub Actions used in .github/workflows/*.yml so action-version
+# bumps land as PRs instead of festering quietly until a Node deprecation
+# breaks CI (see commit 5291bd5 for the post-mortem).
+#
+# Not tracked here: PowerShell modules pinned in RequiredModules.psd1.
+# Dependabot has no PSGallery ecosystem; those bumps happen by hand when
+# upstream issues we filed (e.g. PSProxmoxVE#58, #59) land in a release.
+#
+# Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      # Roll all GH Actions bumps into a single PR per week. Action bumps
+      # are almost always coordinated (Node-version deprecations hit the
+      # whole ecosystem at once) and individual PRs add noise.
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+    labels:
+      - "ci"
+      - "dependencies"
