@@ -40,6 +40,12 @@ Describe 'New-WorkLabAutounattend' {
                 # Disk must be wiped + partitioned + targeted, or Setup loops
                 # with no bootable disk. Default firmware is UEFI: GPT layout
                 # with EFI + MSR + Windows, install to partition 3.
+                # Must be well-formed XML WITH the wcm namespace declared, or
+                # Setup rejects the whole file ("'wcm' is an undeclared prefix")
+                # and resets at launch. Casting to [xml] fails if wcm/xsi aren't
+                # declared, since every element uses wcm:action.
+                $xml | Should -BeLike '*xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"*'
+                { [xml]$xml } | Should -Not -Throw
                 $xml | Should -BeLike '*<DiskConfiguration>*'
                 $xml | Should -BeLike '*<WillWipeDisk>true</WillWipeDisk>*'
                 $xml | Should -BeLike '*<Type>EFI</Type>*'
