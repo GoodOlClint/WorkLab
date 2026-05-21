@@ -35,7 +35,11 @@
     SSHPublicKey + SSHKeyUser. See `tools/win-vm-setup.example.psd1`.
 
 .PARAMETER PowerShellVersion
-    Specific PowerShell 7.6.x version to pin via winget. Default '7.6.0'.
+    PowerShell 7 version prefix to install via winget. Default '7.6' - the
+    script resolves the latest available version under that prefix (e.g.
+    7.6.2) rather than pinning an exact build, because winget often doesn't
+    carry the .0 of a series. Stays on 7.6.x on purpose: 7.7+ drops the
+    machine-scope MSI (wix) installer.
     Do not bump past 7.6.x without a working machine-scope MSI install path.
 
 .PARAMETER SkipPwsh / SkipGit / SkipSsh / SkipAdk / SkipEnv
@@ -58,7 +62,7 @@
 param(
     [string]$ConfigFile,
 
-    [string]$PowerShellVersion = '7.6.0',
+    [string]$PowerShellVersion = '7.6',
 
     [switch]$SkipPwsh,
     [switch]$SkipGit,
@@ -125,6 +129,21 @@ function Get-WingetPackageVersion {
     } catch { $null }
 }
 
+function Resolve-WorkLabPwshVersion {
+    # Find the latest winget version of Microsoft.PowerShell under a prefix
+    # (e.g. '7.6' -> '7.6.2'). winget frequently doesn't carry the '.0' of a
+    # series, so pinning an exact build fails; resolve dynamically instead.
+    param([Parameter(Mandatory)][string]$Prefix)
+    $out = winget show --id Microsoft.PowerShell --versions --source winget --accept-source-agreements 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
+    $candidates = $out |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -match "^$([regex]::Escape($Prefix))(\.|$)" } |
+        Where-Object { $_ -match '^\d+(\.\d+)+$' }
+    if (-not $candidates) { return $null }
+    ($candidates | Sort-Object { [version]$_ } -Descending | Select-Object -First 1)
+}
+
 function Install-WorkLabPowerShell7 {
     [CmdletBinding(SupportsShouldProcess)]
     param([string]$Version)
@@ -133,31 +152,38 @@ function Install-WorkLabPowerShell7 {
     $pwshExe = 'C:\Program Files\PowerShell\7\pwsh.exe'
     if (Test-Path $pwshExe) {
         $existing = (& $pwshExe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()') 2>$null
-        if ($existing -match '^7\.6\.') {
+        if ($existing -match "^$([regex]::Escape($Version))\.") {
             Write-Step ("PowerShell 7 already installed at $pwshExe (v$existing).") 'Skip'
             return
         }
-        Write-Step ("PowerShell 7 found at $pwshExe but version is '$existing' (need 7.6.x). Reinstalling.") 'Warn'
+        Write-Step ("PowerShell 7 found at $pwshExe but version is '$existing' (want $Version.x). Reinstalling.") 'Warn'
     }
 
-    if (-not $PSCmdlet.ShouldProcess('PowerShell 7.6 MSI', 'winget install')) { return }
+    if (-not $PSCmdlet.ShouldProcess("PowerShell $Version.x MSI", 'winget install')) { return }
 
-    Write-Step ("Installing PowerShell $Version via winget (--installer-type wix; MSIX would be user-scope on 7.6).") 'Action'
+    # Resolve the exact latest build under the prefix (e.g. 7.6 -> 7.6.2).
+    $resolved = Resolve-WorkLabPwshVersion -Prefix $Version
+    if (-not $resolved) {
+        throw "Could not find a winget version of Microsoft.PowerShell under '$Version'. Check 'winget show --id Microsoft.PowerShell --versions --source winget'."
+    }
+
+    Write-Step ("Installing PowerShell $resolved via winget (--installer-type wix; MSIX would be user-scope).") 'Action'
     $wingetArgs = @(
         'install', '--id', 'Microsoft.PowerShell',
-        '--version', $Version,
+        '--version', $resolved,
+        '--source', 'winget',
         '--installer-type', 'wix',
         '--scope', 'machine',
         '--silent',
         '--accept-source-agreements', '--accept-package-agreements'
     )
     & winget @wingetArgs
-    if ($LASTEXITCODE -ne 0) { throw "winget install Microsoft.PowerShell $Version failed (exit $LASTEXITCODE)." }
+    if ($LASTEXITCODE -ne 0) { throw "winget install Microsoft.PowerShell $resolved failed (exit $LASTEXITCODE)." }
 
     if (-not (Test-Path $pwshExe)) {
         throw "winget reported success but $pwshExe is missing. Did winget pick a per-user MSIX after all? Try installing manually from the GitHub release MSI."
     }
-    Write-Step ("PowerShell $Version installed at $pwshExe.") 'OK'
+    Write-Step ("PowerShell $resolved installed at $pwshExe.") 'OK'
 }
 
 function Install-WorkLabGit {
@@ -171,7 +197,7 @@ function Install-WorkLabGit {
     if (-not $PSCmdlet.ShouldProcess('Git for Windows', 'winget install')) { return }
 
     Write-Step 'Installing Git for Windows (machine scope).' 'Action'
-    & winget install --id Git.Git --exact --scope machine --silent `
+    & winget install --id Git.Git --exact --source winget --scope machine --silent `
         --accept-source-agreements --accept-package-agreements
     if ($LASTEXITCODE -ne 0) { throw "winget install Git.Git failed (exit $LASTEXITCODE)." }
 
