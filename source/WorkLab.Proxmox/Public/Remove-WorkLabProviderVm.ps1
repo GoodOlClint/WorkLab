@@ -34,6 +34,12 @@ function Remove-WorkLabProviderVm {
         return [pscustomobject]@{ Name = $VmName; VmId = $id.VmId; Removed = $false }
     }
     if ($PSCmdlet.ShouldProcess("$VmName (VMID $($id.VmId))", 'Remove-PveVm')) {
+        # Proxmox refuses to destroy a running VM ("VM <id> is running - destroy
+        # failed"), and -Force does not force-stop. Hard-stop first if needed.
+        if ($t.Resolved.Vm.Status -eq 'running') {
+            Stop-PveVm -Node $t.Settings.Node -VmId $id.VmId -Wait `
+                -Session $t.Session -Confirm:$false -ErrorAction Stop
+        }
         Remove-PveVm -Node $t.Settings.Node -VmId $id.VmId -Purge -Force -Wait `
             -Session $t.Session -Confirm:$false -ErrorAction Stop
         return [pscustomobject]@{ Name = $VmName; VmId = $id.VmId; Removed = $true }

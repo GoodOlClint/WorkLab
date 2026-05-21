@@ -106,19 +106,43 @@ Describe 'Copy-WorkLabProviderVm' {
         }
     }
 
-    It 'full-clones from the template when target absent' {
+    It 'full-clones from the template when target absent and enables the guest agent' {
         InModuleScope WorkLab.Proxmox {
             Mock Connect-WorkLabProxmox { 'S' }
             $script:cloned = $false
             Mock New-PveVmFromTemplate -RemoveParameterType 'Session' { $script:cloned = $true }
+            $script:cfg = $null
+            Mock Set-PveVmConfig -RemoveParameterType 'Session' { $script:cfg = $AdditionalConfig }
             Mock Get-PveVm -RemoveParameterType 'Session' {
                 if ($TemplatesOnly) { [pscustomobject]@{ Name = 'lab-base-tpl01'; VmId = 9000 } }
                 elseif ($script:cloned) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'stopped' } }
             }
+            # No Slug -> no net0 re-NIC, but the agent must still be enabled
+            # (Proxmox returns "No QEMU guest agent configured" otherwise).
             $r = Copy-WorkLabProviderVm -Context @{ Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n' } } -TemplateName lab-base-tpl01 -VmName lab-demo-dc01 -Confirm:$false
             $script:cloned | Should -BeTrue
             $r.Existed | Should -BeFalse
             $r.Name | Should -Be 'lab-demo-dc01'
+            $script:cfg.agent | Should -Be '1'
+            $script:cfg.Keys | Should -Not -Contain 'net0'
+        }
+    }
+
+    It 're-NICs to the per-lab VNet AND enables the agent when Slug is present' {
+        InModuleScope WorkLab.Proxmox {
+            Mock Connect-WorkLabProxmox { 'S' }
+            $script:cloned = $false
+            Mock New-PveVmFromTemplate -RemoveParameterType 'Session' { $script:cloned = $true }
+            Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
+            $script:cfg = $null
+            Mock Set-PveVmConfig -RemoveParameterType 'Session' { $script:cfg = $AdditionalConfig }
+            Mock Get-PveVm -RemoveParameterType 'Session' {
+                if ($TemplatesOnly) { [pscustomobject]@{ Name = 'lab-base-tpl01'; VmId = 9000 } }
+                elseif ($script:cloned) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'stopped' } }
+            }
+            Copy-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n' } } -TemplateName lab-base-tpl01 -VmName lab-demo-dc01 -Confirm:$false | Out-Null
+            $script:cfg.agent | Should -Be '1'
+            $script:cfg.net0  | Should -Match 'bridge='
         }
     }
 }

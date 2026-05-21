@@ -182,4 +182,21 @@ Describe 'Start/Stop/Remove-WorkLabProviderVm idempotency' {
             $script:removed | Should -Be 1
         }
     }
+
+    It 'Remove: hard-stops a running VM before destroying it' {
+        # Proxmox refuses to destroy a running VM ("VM <id> is running - destroy
+        # failed"); Remove must stop it first.
+        InModuleScope WorkLab.Proxmox {
+            Mock Connect-WorkLabProxmox { 'S' }
+            $script:stopped = 0
+            $script:removed = 0
+            Mock Stop-PveVm -RemoveParameterType 'Session' { $script:stopped++ }
+            Mock Remove-PveVm -RemoveParameterType 'Session' { $script:removed++ }
+            Mock Get-PveVm -RemoveParameterType 'Session' { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'running' } }
+
+            (Remove-WorkLabProviderVm -Context @{ Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n' } } -VmName lab-demo-dc01 -Confirm:$false).Removed | Should -BeTrue
+            $script:stopped | Should -Be 1
+            $script:removed | Should -Be 1
+        }
+    }
 }

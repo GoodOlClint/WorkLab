@@ -67,15 +67,25 @@ function Copy-WorkLabProviderVm {
         if (-not $Linked) { $clone['Full'] = $true }
         New-PveVmFromTemplate @clone
 
+        # Enable the QEMU guest agent on the clone. Proxmox returns "No QEMU
+        # guest agent configured" on every agent API call unless the VM has
+        # agent=1 set — independent of whether qemu-ga is actually running in
+        # the guest (it is; the image bakes it in). Without this the guest
+        # channel (Test/Invoke/Write/Read) never works and the reachability
+        # wait times out. (No 'boot' key here, so the PSProxmoxVE
+        # device-reparse bug — see WorkLab New-WorkLabProviderVm — doesn't apply.)
+        $agentCfg = @{ agent = '1' }
+
         # The template's NIC may reference a deleted ephemeral build VNet.
         # When cloning into a lab (Context.Slug present), re-attach net0 to
         # the per-lab VNet so the clone has working networking.
         if (-not [string]::IsNullOrWhiteSpace($settings.Slug)) {
             $net = Get-WorkLabProxmoxNetworkIdentity -Slug $settings.Slug `
                 -PoolStart $settings.VlanPoolStart -PoolEnd $settings.VlanPoolEnd
-            Set-PveVmConfig -Node $settings.Node -VmId $id.VmId -Session $session -Confirm:$false -ErrorAction Stop `
-                -AdditionalConfig @{ net0 = "virtio,bridge=$($net.Vnet)" }
+            $agentCfg['net0'] = "virtio,bridge=$($net.Vnet)"
         }
+        Set-PveVmConfig -Node $settings.Node -VmId $id.VmId -Session $session -Confirm:$false -ErrorAction Stop `
+            -AdditionalConfig $agentCfg
 
         if ($Start) {
             Start-PveVm -Node $settings.Node -VmId $id.VmId -Wait -Session $session -Confirm:$false -ErrorAction Stop
