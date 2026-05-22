@@ -61,7 +61,10 @@ try {
 } catch {
     `$result.Error = `$_.Exception.Message
 }
-`$result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath '$resultPath' -Encoding utf8
+# Write UTF-8 *without* a BOM. The guest runs Windows PowerShell 5.1, whose
+# Set-Content -Encoding utf8 prepends a BOM that then trips ConvertFrom-Json on
+# read-back ("Unexpected character encountered ... 'ï'").
+[System.IO.File]::WriteAllText('$resultPath', (`$result | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding(`$false)))
 "@
 
     if (-not $PSCmdlet.ShouldProcess("$VmName : $ModuleName/$ResourceName", 'Invoke-DscResource via guest channel')) { return }
@@ -74,7 +77,10 @@ try {
         -TimeoutSeconds $TimeoutSeconds
 
     $fetched = Get-WorkLabGuestFile -Provider $Provider -Context $Context -VmName $VmName -Path $resultPath
-    $resultObj = $fetched.Content | ConvertFrom-Json
+    # Defensively strip a leading UTF-8 BOM (U+FEFF) before parsing -- guest
+    # files written by Windows PowerShell can carry one and ConvertFrom-Json
+    # rejects it.
+    $resultObj = "$($fetched.Content)".TrimStart([char]0xFEFF) | ConvertFrom-Json
 
     [pscustomobject]@{
         VmName               = $VmName

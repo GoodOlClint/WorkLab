@@ -100,4 +100,28 @@ Describe 'Invoke-WorkLabDscResource' {
             $script:executed.Arguments | Should -Contain $script:pushed.Path
         }
     }
+
+    It 'tolerates a UTF-8 BOM on the guest result file (PS 5.1 writes one)' {
+        InModuleScope WorkLab {
+            Mock Invoke-WorkLabProviderCommand -RemoveParameterType 'Provider' {
+                switch ("$Verb-$Noun") {
+                    'Write-GuestFile' { return [pscustomobject]@{ Path = $Arguments.Path; Bytes = 1 } }
+                    'Invoke-GuestCommand' { return [pscustomobject]@{ ExitCode = 0; Stdout = ''; Stderr = ''; Pid = 1 } }
+                    'Read-GuestFile' {
+                        # Leading U+FEFF BOM, as Windows PowerShell 5.1 Set-Content -Encoding utf8 emits.
+                        $json = (@{ InDesiredStateBefore = $false; SetApplied = $true; InDesiredStateAfter = $true; Error = $null } | ConvertTo-Json)
+                        return [pscustomobject]@{ Content = ([char]0xFEFF + $json) }
+                    }
+                }
+            }
+
+            $r = Invoke-WorkLabDscResource -Provider @{} -Context @{} -VmName lab-x-dc01 `
+                -ResourceName File -ModuleName PSDesiredStateConfiguration `
+                -Property @{ DestinationPath = 'C:\hello.txt'; Contents = 'hi'; Ensure = 'Present' } -Confirm:$false
+
+            # Parses despite the BOM (no ConvertFrom-Json failure).
+            $r.InDesiredStateAfter | Should -BeTrue
+            $r.SetApplied | Should -BeTrue
+        }
+    }
 }
