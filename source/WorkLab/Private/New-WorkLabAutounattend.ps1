@@ -22,8 +22,17 @@ function New-WorkLabAutounattend {
     )
 
     $plain = [pscredential]::new('x', $AdminPassword).GetNetworkCredential().Password
-    $enc = [Convert]::ToBase64String(
+    # Windows obfuscates each unattend password as base64(UTF16LE(password +
+    # <containing element name>). The suffix differs per field: the
+    # AdministratorPassword element uses 'AdministratorPassword'; the AutoLogon
+    # Password element uses 'Password'. Reusing one value for both makes
+    # AutoLogon's password decode wrong -> AutoLogon silently fails -> the VM
+    # sits at the logon screen and FirstLogonCommands (qemu-ga + sysprep)
+    # never run.
+    $encAdmin = [Convert]::ToBase64String(
         [System.Text.Encoding]::Unicode.GetBytes($plain + 'AdministratorPassword'))
+    $encAutoLogon = [Convert]::ToBase64String(
+        [System.Text.Encoding]::Unicode.GetBytes($plain + 'Password'))
     $imageKey = if ($Edition -match '^\d+$') {
         "<MetaData wcm:action=`"add`"><Key>/IMAGE/INDEX</Key><Value>$Edition</Value></MetaData>"
     }
@@ -119,11 +128,11 @@ $diskConfig
   <settings pass="oobeSystem">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
       <UserAccounts>
-        <AdministratorPassword><Value>$enc</Value><PlainText>false</PlainText></AdministratorPassword>
+        <AdministratorPassword><Value>$encAdmin</Value><PlainText>false</PlainText></AdministratorPassword>
       </UserAccounts>
       <OOBE><HideEULAPage>true</HideEULAPage><ProtectYourPC>3</ProtectYourPC><SkipMachineOOBE>true</SkipMachineOOBE><SkipUserOOBE>true</SkipUserOOBE></OOBE>
       <ComputerName>*</ComputerName>
-      <AutoLogon><Password><Value>$enc</Value><PlainText>false</PlainText></Password><Enabled>true</Enabled><Username>Administrator</Username><LogonCount>1</LogonCount></AutoLogon>
+      <AutoLogon><Password><Value>$encAutoLogon</Value><PlainText>false</PlainText></Password><Enabled>true</Enabled><Username>Administrator</Username><LogonCount>1</LogonCount></AutoLogon>
       <FirstLogonCommands>
 $firstLogon
       </FirstLogonCommands>

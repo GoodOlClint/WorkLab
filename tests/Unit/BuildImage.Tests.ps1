@@ -28,8 +28,12 @@ Describe 'New-WorkLabAutounattend' {
             try {
                 New-WorkLabAutounattend -Edition 2 -AdminPassword $ss -Locale 'en-GB' -OutFile $out | Out-Null
                 $xml = Get-Content -LiteralPath $out -Raw
-                $expected = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes('P@ss' + 'AdministratorPassword'))
-                $xml | Should -BeLike "*<Value>$expected</Value>*"
+                # Each password field obfuscates with its OWN element-name suffix.
+                $expectedAdmin = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes('P@ss' + 'AdministratorPassword'))
+                $expectedAuto  = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes('P@ss' + 'Password'))
+                $expectedAdmin | Should -Not -Be $expectedAuto
+                $xml | Should -BeLike "*<AdministratorPassword><Value>$expectedAdmin</Value>*"
+                $xml | Should -BeLike "*<AutoLogon><Password><Value>$expectedAuto</Value>*"
                 $xml | Should -BeLike '*<PlainText>false</PlainText>*'
                 $xml | Should -BeLike '*<UILanguage>en-GB</UILanguage>*'
                 $xml | Should -BeLike '*/IMAGE/INDEX*'
