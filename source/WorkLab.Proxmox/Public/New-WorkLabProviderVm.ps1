@@ -79,21 +79,23 @@ function New-WorkLabProviderVm {
     }
 
     if ($PSCmdlet.ShouldProcess("$VmName (VMID $($id.VmId))", 'New-PveVm')) {
-        # PSProxmoxVE accepts "60G"-style strings but passes them through to
-        # the Proxmox API verbatim. LVM-backed storages (lvm, lvm-thin) reject
-        # the unit and interpret the suffix as a volume name ("unable to parse
-        # lvm volume name '1G'"); they want a bare integer in GB. File-backed
-        # storages tolerate either. Normalize here so we send what every
-        # storage type accepts.
+        # PSProxmoxVE / the Proxmox API reject a unit-suffixed disk size on
+        # LVM-backed storages (lvm, lvm-thin) -- they read "60G" as a volume
+        # name ("unable to parse lvm volume name '1G'") and want a bare integer
+        # in GB. File-backed storages tolerate either. Normalize to bare GB for
+        # the scsi0 disk spec below.
         $normalizedDiskSize = Get-WorkLabProxmoxDiskSizeGB -DiskSize $DiskSize
+
+        # Create the VM DISKLESS. New-PveVm can only make a plain virtio0 disk
+        # with no IO options; we add the boot disk below on a tuned
+        # virtio-scsi-single controller instead (New-PveVm has no params for the
+        # controller type or any disk IO option -- filed upstream).
         $newVm = @{
             Node        = $settings.Node
             VmId        = $id.VmId
             Name        = $VmName
             Memory      = $MemoryMB
             Cores       = $Cores
-            DiskSize    = $normalizedDiskSize
-            DiskStorage = $settings.DiskStorage
             Bridge      = $net.Vnet
             Wait        = $true
             Session     = $session
@@ -112,42 +114,53 @@ function New-WorkLabProviderVm {
             $newVm['Machine'] = 'q35'
             $newVm['CpuType'] = 'x86-64-v2-AES'
         }
-        # Deliberately do NOT start as part of create. When an ISO is attached
-        # the CD-ROM device + boot order must be in place BEFORE first power-on,
-        # otherwise the VM boots with no bootable device and bootloops ("no
-        # available device"). Configure fully, then start explicitly below.
+        # Deliberately do NOT start as part of create. The disk, EFI vars, and
+        # CD-ROM + boot order must be in place BEFORE first power-on, or the VM
+        # boots with no bootable device and bootloops. Configure fully, start
+        # explicitly below.
         New-PveVm @newVm
 
-        # OVMF needs an EFI vars disk (NVRAM) or the VM has no UEFI firmware
-        # store and can't persist/boot a UEFI OS. New-PveVm doesn't create one,
-        # so add it here. efitype=4m is the modern 4MB OVMF; pre-enrolled-keys=0
-        # leaves Secure Boot unenrolled so unattended install media isn't
-        # signature-gated. (Verified the <storage>:1 create syntax allocates a
-        # 4MB efidisk on this cluster.)
-        if ($Bios -eq 'ovmf') {
-            Set-PveVmConfig -Node $settings.Node -VmId $id.VmId -Session $session -Confirm:$false -ErrorAction Stop `
-                -AdditionalConfig @{
-                    efidisk0 = "$($settings.DiskStorage):1,efitype=4m,pre-enrolled-keys=0"
-                }
+        # Boot disk on virtio-scsi-single with full IO tuning:
+        #   iothread=1   dedicated IO thread (needs virtio-scsi-single or virtio-blk)
+        #   aio=native   native Linux AIO (pairs with raw/LVM-thin)
+        #   ssd=1        present as SSD (TRIM hints; needs a SCSI/SATA bus -- virtio-blk rejects ssd)
+        #   discard=on   pass TRIM through so thin storage reclaims space
+        # Same call adds the OVMF EFI vars disk (NVRAM; without it a UEFI VM has
+        # no firmware store and can't persist/boot a UEFI OS -- efitype=4m is the
+        # modern 4MB OVMF, pre-enrolled-keys=0 leaves Secure Boot unenrolled so
+        # unattended media isn't signature-gated) and enables the guest-agent
+        # channel (agent=1). The image's pre-sysprep FirstLogon installs the
+        # virtio-serial driver + qemu-ga; having the channel present here lets the
+        # agent bind and come up on the template. Clones get agent=1 of their own
+        # (Copy-WorkLabProviderVm).
+        $diskCfg = @{
+            scsihw = 'virtio-scsi-single'
+            scsi0  = "$($settings.DiskStorage):$normalizedDiskSize,iothread=1,aio=native,ssd=1,discard=on"
+            agent  = '1'
         }
+        if ($Bios -eq 'ovmf') {
+            $diskCfg['efidisk0'] = "$($settings.DiskStorage):1,efitype=4m,pre-enrolled-keys=0"
+        }
+        Set-PveVmConfig -Node $settings.Node -VmId $id.VmId -Session $session -Confirm:$false -ErrorAction Stop `
+            -AdditionalConfig $diskCfg
+
+        # Boot from the disk first. Name ONLY scsi0 in the boot order: a
+        # config-created scsi0 is NOT auto-added to the order (so we must), while
+        # naming the CD (ide2) here would trip a PSProxmoxVE serialization bug
+        # that re-emits ordered devices as malformed drive params ("ide2: unable
+        # to parse drive options" -- filed upstream). The ide2 added below IS
+        # auto-appended by Proxmox, landing after scsi0 (CD-last): the empty disk
+        # is non-bootable so firmware falls through to the CD on first boot, then
+        # the installed disk boots first on every later reboot -- no CD reboot
+        # loop, no need to detach the ISO mid-build.
+        Set-PveVmConfig -Node $settings.Node -VmId $id.VmId -Session $session -Confirm:$false -ErrorAction Stop `
+            -AdditionalConfig @{ boot = 'order=scsi0' }
 
         if ($IsoName) {
-            # Attach the install ISO as a CD-ROM. Set ONLY ide2 — do not set the
-            # 'boot' key in the same (or a separate) Set-PveVmConfig call:
-            # PSProxmoxVE re-emits every disk device named in the boot-order
-            # string as a (malformed) drive parameter, so any call carrying
-            # 'boot' fails with "<dev>: unable to parse drive options" (filed
-            # upstream). Attaching ide2 alone makes Proxmox auto-append it to
-            # the existing boot order (e.g. 'order=virtio0;net0;ide2'). CD-last
-            # is exactly what an unattended Windows install wants: the empty OS
-            # disk is non-bootable so firmware falls through to the CD on first
-            # boot, and once Windows is installed the disk boots first on every
-            # subsequent reboot — no "Setup keeps rebooting into the CD" loop,
-            # and no need to detach the ISO mid-build.
+            # Attach the install ISO as a CD-ROM; Proxmox auto-appends it to the
+            # boot order after scsi0 (see the boot-order note above).
             Set-PveVmConfig -Node $settings.Node -VmId $id.VmId -Session $session -Confirm:$false -ErrorAction Stop `
-                -AdditionalConfig @{
-                    ide2 = "$($settings.IsoStorage):iso/$IsoName,media=cdrom"
-                }
+                -AdditionalConfig @{ ide2 = "$($settings.IsoStorage):iso/$IsoName,media=cdrom" }
         }
 
         if ($Start) {

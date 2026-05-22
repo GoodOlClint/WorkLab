@@ -24,6 +24,7 @@ Describe 'New-WorkLabProviderVm' {
         InModuleScope WorkLab.Proxmox {
             Mock Connect-WorkLabProxmox { 'S' }
             Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
+            Mock Set-PveVmConfig -RemoveParameterType 'Session' { }
             $script:created = 0
             Mock New-PveVm -RemoveParameterType 'Session' { $script:created++ }
             $script:vmExists = $false
@@ -49,12 +50,17 @@ Describe 'New-WorkLabProviderVm' {
         }
     }
 
-    It 'normalizes DiskSize ("60G" -> "60") before calling New-PveVm (LVM-storage workaround)' {
+    It 'normalizes DiskSize ("60G" -> "60") into the scsi0 disk spec (LVM-storage workaround)' {
         InModuleScope WorkLab.Proxmox {
             Mock Connect-WorkLabProxmox { 'S' }
             Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
-            $script:seenDiskSize = $null
-            Mock New-PveVm -RemoveParameterType 'Session' { $script:seenDiskSize = $DiskSize }
+            # The VM is created diskless; the boot disk (with size + IO options)
+            # is added via Set-PveVmConfig's scsi0 spec.
+            $script:seenScsi0 = $null
+            Mock New-PveVm -RemoveParameterType 'Session' { }
+            Mock Set-PveVmConfig -RemoveParameterType 'Session' {
+                if ($AdditionalConfig.ContainsKey('scsi0')) { $script:seenScsi0 = $AdditionalConfig['scsi0'] }
+            }
             $script:made = $false
             Mock Get-PveVm -RemoveParameterType 'Session' {
                 if ($script:made) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'stopped' } }
@@ -62,18 +68,27 @@ Describe 'New-WorkLabProviderVm' {
             }
             New-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n'; DiskStorage = 'lvm' } } `
                 -VmName lab-demo-dc01 -DiskSize '60G' -Confirm:$false | Out-Null
-            $script:seenDiskSize | Should -Be '60'
+            $script:seenScsi0 | Should -BeLike 'lvm:60,*'
+            # IO tuning is present on the boot disk.
+            $script:seenScsi0 | Should -BeLike '*iothread=1*'
+            $script:seenScsi0 | Should -BeLike '*aio=native*'
+            $script:seenScsi0 | Should -BeLike '*ssd=1*'
+            $script:seenScsi0 | Should -BeLike '*discard=on*'
         }
     }
 
-    It 'attaches an ISO (requires IsoStorage) via Set-PveVmConfig with ide2 only (no boot key)' {
+    It 'attaches an ISO (requires IsoStorage) and sets a scsi0-only boot order (PSProxmoxVE bug workaround)' {
         InModuleScope WorkLab.Proxmox {
             Mock Connect-WorkLabProxmox { 'S' }
             Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
             Mock New-PveVm -RemoveParameterType 'Session' { }
-            $script:cfg = 0
-            $script:cfgKeys = $null
-            Mock Set-PveVmConfig -RemoveParameterType 'Session' { $script:cfg++; $script:cfgKeys = @($AdditionalConfig.Keys) }
+            # Accumulate keys + the boot value across every config call.
+            $script:allKeys = [System.Collections.Generic.List[string]]::new()
+            $script:bootVal = $null
+            Mock Set-PveVmConfig -RemoveParameterType 'Session' {
+                foreach ($k in $AdditionalConfig.Keys) { $script:allKeys.Add($k) }
+                if ($AdditionalConfig.ContainsKey('boot')) { $script:bootVal = $AdditionalConfig['boot'] }
+            }
             $script:made = $false
             Mock Get-PveVm -RemoveParameterType 'Session' {
                 if ($script:made) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'stopped' } }
@@ -84,14 +99,17 @@ Describe 'New-WorkLabProviderVm' {
             Mock Get-PveVm -RemoveParameterType 'Session' { if ($script:made) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123 } } else { $script:made = $true } }
             $script:made = $false
             New-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n'; DiskStorage = 'd'; IsoStorage = 'local' } } -VmName lab-demo-dc01 -IsoName win.iso -Confirm:$false | Out-Null
-            $script:cfg | Should -Be 1
-            # Workaround for the PSProxmoxVE Set-PveVmConfig bug: a 'boot' key
-            # makes it re-emit the disk devices in the order string as malformed
-            # drive params ("<dev>: unable to parse drive options"). We set ide2
-            # only and let Proxmox auto-append it to the boot order (CD-last,
-            # which is what unattended Windows install wants).
-            $script:cfgKeys | Should -Contain 'ide2'
-            $script:cfgKeys | Should -Not -Contain 'boot'
+            $script:allKeys | Should -Contain 'ide2'
+            $script:allKeys | Should -Contain 'scsi0'
+            $script:allKeys | Should -Contain 'scsihw'
+            # The build/template VM also gets the guest-agent channel (agent=1)
+            # so qemu-ga binds during the image's pre-sysprep FirstLogon.
+            $script:allKeys | Should -Contain 'agent'
+            # The boot order must name ONLY scsi0. Naming the CD (ide2) trips the
+            # PSProxmoxVE serialization bug ("ide2: unable to parse drive
+            # options"); Proxmox auto-appends ide2 after scsi0 (CD-last) instead.
+            $script:bootVal | Should -Be 'order=scsi0'
+            $script:bootVal | Should -Not -BeLike '*ide2*'
         }
     }
 
@@ -102,8 +120,8 @@ Describe 'New-WorkLabProviderVm' {
             $script:newVmMachine = $null
             $script:newVmCpu = $null
             Mock New-PveVm -RemoveParameterType 'Session' { $script:newVmMachine = $Machine; $script:newVmCpu = $CpuType }
-            $script:cfgKeys = $null
-            Mock Set-PveVmConfig -RemoveParameterType 'Session' { $script:cfgKeys = @($AdditionalConfig.Keys) }
+            $script:allKeys = [System.Collections.Generic.List[string]]::new()
+            Mock Set-PveVmConfig -RemoveParameterType 'Session' { foreach ($k in $AdditionalConfig.Keys) { $script:allKeys.Add($k) } }
             $script:made = $false
             Mock Get-PveVm -RemoveParameterType 'Session' {
                 if ($script:made) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123; Status = 'stopped' } }
@@ -113,15 +131,17 @@ Describe 'New-WorkLabProviderVm' {
                 -VmName lab-demo-dc01 -Bios ovmf -Confirm:$false | Out-Null
             $script:newVmMachine | Should -Be 'q35'
             $script:newVmCpu | Should -Be 'x86-64-v2-AES'
-            $script:cfgKeys | Should -Contain 'efidisk0'
+            # efidisk0 (EFI vars) is folded into the disk-create config call.
+            $script:allKeys | Should -Contain 'efidisk0'
+            $script:allKeys | Should -Contain 'scsi0'
         }
     }
 
     It 'attaches the ISO BEFORE starting (no bootloop on empty disk)' {
         # Regression: when -Start and -IsoName were both passed, New-PveVm was
         # called with Start=$true and the VM powered on before Set-PveVmConfig
-        # attached the CD-ROM -> "no available device" bootloop. The CD-ROM
-        # must be attached while the VM is still stopped, then started.
+        # attached the CD-ROM -> "no available device" bootloop. All config
+        # (disk, boot order, CD-ROM) must be applied while stopped, then started.
         InModuleScope WorkLab.Proxmox {
             Mock Connect-WorkLabProxmox { 'S' }
             Mock Get-PveSdnVnet -RemoveParameterType 'Session' { [pscustomobject]@{ Vnet = 'lXXXXXXX' } }
@@ -141,7 +161,10 @@ Describe 'New-WorkLabProviderVm' {
             New-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n'; DiskStorage = 'd'; IsoStorage = 'local' } } `
                 -VmName lab-demo-dc01 -IsoName win.iso -Start -Confirm:$false | Out-Null
 
-            $script:order | Should -Be @('New-PveVm', 'Set-PveVmConfig', 'Start-PveVm')
+            # diskless create, then disk+firmware+agent, boot order, CD-ROM, then start.
+            $script:order | Should -Be @('New-PveVm', 'Set-PveVmConfig', 'Set-PveVmConfig', 'Set-PveVmConfig', 'Start-PveVm')
+            $script:order[0] | Should -Be 'New-PveVm'
+            $script:order[-1] | Should -Be 'Start-PveVm'
         }
     }
 }
