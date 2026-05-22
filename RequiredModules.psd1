@@ -19,5 +19,5 @@
 
     # Provider runtime deps (resolved for build/test even though Phase 0
     # only wires Proxmox network ops).
-    PSProxmoxVE        = '0.1.3'   # pin: requires the -TimeoutSeconds (PSProxmoxVE#59) + DiskSize normalize (#58) fixes
+    PSProxmoxVE        = '0.2.0'   # pin: needs guest-exec argv fix (#69) for the Phase 2.5 guest channel; also #58/#59/#64
 }
