@@ -3,22 +3,48 @@ BeforeAll {
 }
 
 Describe 'Wait-WorkLabProviderGuestAgentReady' {
-    It 'returns when the agent reports reachable' {
+    It 'returns ready when the probe exec succeeds and stdout matches setup-complete' {
         InModuleScope WorkLab {
+            $script:probe = $null
             Mock Invoke-WorkLabProviderCommand -RemoveParameterType 'Provider' {
-                [pscustomobject]@{ Reachable = $true; VmName = 'lab-x-dc01' }
+                $script:probe = $Arguments
+                [pscustomobject]@{ ExitCode = 0; Stdout = '    ImageState    REG_SZ    IMAGE_STATE_COMPLETE'; Stderr = '' }
             }
             (Wait-WorkLabProviderGuestAgentReady -Provider @{} -Context @{} -VmName lab-x-dc01 -TimeoutSeconds 5).Reachable |
                 Should -BeTrue
+            # Default probe is the Windows ImageState query, run as an exec.
+            $script:probe.Command | Should -Be 'reg.exe'
+            $script:probe.Arguments | Should -Contain 'ImageState'
         }
     }
-    It 'throws on timeout' {
+    It 'keeps waiting (then times out) while setup is still in progress' {
         InModuleScope WorkLab {
+            # Agent answers, but ImageState isn't COMPLETE yet -> not ready.
             Mock Invoke-WorkLabProviderCommand -RemoveParameterType 'Provider' {
-                [pscustomobject]@{ Reachable = $false }
+                [pscustomobject]@{ ExitCode = 0; Stdout = '    ImageState    REG_SZ    IMAGE_STATE_UNDEPLOYABLE'; Stderr = '' }
             }
             { Wait-WorkLabProviderGuestAgentReady -Provider @{} -Context @{} -VmName lab-x-dc01 -TimeoutSeconds 0 } |
                 Should -Throw -ExpectedMessage '*Timed out*'
+        }
+    }
+    It 'treats an exec failure (agent not running / mid-reboot) as not-ready' {
+        InModuleScope WorkLab {
+            Mock Invoke-WorkLabProviderCommand -RemoveParameterType 'Provider' { throw 'QEMU guest agent is not running' }
+            { Wait-WorkLabProviderGuestAgentReady -Provider @{} -Context @{} -VmName lab-x-dc01 -TimeoutSeconds 0 } |
+                Should -Throw -ExpectedMessage '*Timed out*'
+        }
+    }
+    It 'honors a custom (non-Windows) readiness probe' {
+        InModuleScope WorkLab {
+            $script:probe = $null
+            Mock Invoke-WorkLabProviderCommand -RemoveParameterType 'Provider' {
+                $script:probe = $Arguments
+                [pscustomobject]@{ ExitCode = 0; Stdout = 'running'; Stderr = '' }
+            }
+            (Wait-WorkLabProviderGuestAgentReady -Provider @{} -Context @{} -VmName lab-x-dc01 -TimeoutSeconds 5 `
+                -ReadyCommand 'systemctl' -ReadyArguments @('is-system-running') -ReadySuccessPattern 'running').Ready |
+                Should -BeTrue
+            $script:probe.Command | Should -Be 'systemctl'
         }
     }
 }

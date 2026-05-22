@@ -31,8 +31,9 @@ Describe 'Lab orchestration (provider dispatch + discovery seam mocked)' {
                     )
                 }
                 if ($Verb -eq 'Remove' -and $Noun -eq 'Network') { return [pscustomobject]@{ Removed = $true } }
-                if ($Verb -eq 'Test' -and $Noun -eq 'GuestAgent') {
-                    return [pscustomobject]@{ Reachable = $true; VmName = $Arguments.VmName }
+                if ($Verb -eq 'Invoke' -and $Noun -eq 'GuestCommand') {
+                    # Guest-ready probe: report Windows setup complete.
+                    return [pscustomobject]@{ ExitCode = 0; Stdout = 'ImageState REG_SZ IMAGE_STATE_COMPLETE'; Stderr = '' }
                 }
             }
         }
@@ -50,7 +51,7 @@ Describe 'Lab orchestration (provider dispatch + discovery seam mocked)' {
             Should -Invoke New-WorkLabImageTemplate -Times 1
             $script:calls[0] | Should -Be 'New-Network'
             $script:calls | Should -Contain 'Copy-Vm'
-            $script:calls | Should -Contain 'Test-GuestAgent'
+            $script:calls | Should -Contain 'Invoke-GuestCommand'
         }
     }
 
