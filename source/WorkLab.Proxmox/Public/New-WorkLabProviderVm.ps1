@@ -146,9 +146,9 @@ function New-WorkLabProviderVm {
 
         # Boot from the disk first. Name ONLY scsi0 in the boot order: a
         # config-created scsi0 is NOT auto-added to the order (so we must), while
-        # naming the CD (ide2) here would trip a PSProxmoxVE serialization bug
-        # that re-emits ordered devices as malformed drive params ("ide2: unable
-        # to parse drive options" -- filed upstream). The ide2 added below IS
+        # naming the CD here would trip a PSProxmoxVE serialization bug that
+        # re-emits ordered devices as malformed drive params ("<dev>: unable to
+        # parse drive options" -- filed upstream as #64). The CD added below IS
         # auto-appended by Proxmox, landing after scsi0 (CD-last): the empty disk
         # is non-bootable so firmware falls through to the CD on first boot, then
         # the installed disk boots first on every later reboot -- no CD reboot
@@ -157,10 +157,14 @@ function New-WorkLabProviderVm {
             -AdditionalConfig @{ boot = 'order=scsi0' }
 
         if ($IsoName) {
-            # Attach the install ISO as a CD-ROM; Proxmox auto-appends it to the
-            # boot order after scsi0 (see the boot-order note above).
+            # Attach the install ISO as a SATA/AHCI CD-ROM, not IDE: qemu's IDE
+            # CD is its slowest bus, and Windows Setup reads ~5 GB of media off
+            # it -- on AHCI the install is markedly faster. OVMF boots a SATA CD
+            # natively and WinPE has built-in AHCI support, so no injected driver
+            # is needed. Proxmox auto-appends sata0 to the boot order after scsi0
+            # (CD-last; see the boot-order note above).
             Set-PveVmConfig -Node $settings.Node -VmId $id.VmId -Session $session -Confirm:$false -ErrorAction Stop `
-                -AdditionalConfig @{ ide2 = "$($settings.IsoStorage):iso/$IsoName,media=cdrom" }
+                -AdditionalConfig @{ sata0 = "$($settings.IsoStorage):iso/$IsoName,media=cdrom" }
         }
 
         if ($Start) {

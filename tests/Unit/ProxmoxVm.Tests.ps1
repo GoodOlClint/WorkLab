@@ -99,17 +99,18 @@ Describe 'New-WorkLabProviderVm' {
             Mock Get-PveVm -RemoveParameterType 'Session' { if ($script:made) { [pscustomobject]@{ Name = 'lab-demo-dc01'; VmId = 9123 } } else { $script:made = $true } }
             $script:made = $false
             New-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n'; DiskStorage = 'd'; IsoStorage = 'local' } } -VmName lab-demo-dc01 -IsoName win.iso -Confirm:$false | Out-Null
-            $script:allKeys | Should -Contain 'ide2'
+            # Install CD is attached on SATA/AHCI (faster than IDE for Setup).
+            $script:allKeys | Should -Contain 'sata0'
             $script:allKeys | Should -Contain 'scsi0'
             $script:allKeys | Should -Contain 'scsihw'
             # The build/template VM also gets the guest-agent channel (agent=1)
             # so qemu-ga binds during the image's pre-sysprep FirstLogon.
             $script:allKeys | Should -Contain 'agent'
-            # The boot order must name ONLY scsi0. Naming the CD (ide2) trips the
-            # PSProxmoxVE serialization bug ("ide2: unable to parse drive
-            # options"); Proxmox auto-appends ide2 after scsi0 (CD-last) instead.
+            # The boot order must name ONLY scsi0. Naming the CD trips the
+            # PSProxmoxVE serialization bug ("<dev>: unable to parse drive
+            # options"); Proxmox auto-appends the CD after scsi0 (CD-last) instead.
             $script:bootVal | Should -Be 'order=scsi0'
-            $script:bootVal | Should -Not -BeLike '*ide2*'
+            $script:bootVal | Should -Not -BeLike '*sata0*'
         }
     }
 

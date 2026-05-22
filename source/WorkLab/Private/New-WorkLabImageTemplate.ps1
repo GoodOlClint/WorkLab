@@ -50,7 +50,11 @@ function New-WorkLabImageTemplate {
         Invoke-WorkLabProviderCommand -Provider $Provider -Verb 'New' -Noun 'Vm' `
             -Arguments @{ Context = $ctx; VmName = $tplName; IsoName = $isoLeaf; Bios = 'ovmf'; OsType = 'win11'; Start = $true } | Out-Null
 
-        Wait-WorkLabProviderVmStopped -Provider $Provider -Context $ctx -VmName $tplName
+        # Generous stop timeout: the unattended install reads its media off the
+        # SATA CD (ISO often on slower/networked storage) and the FirstLogon
+        # virtio guest-tools + qemu-ga MSIs run before sysprep, so a from-scratch
+        # build legitimately runs well past the 30-min default.
+        Wait-WorkLabProviderVmStopped -Provider $Provider -Context $ctx -VmName $tplName -TimeoutSeconds 3600
 
         Invoke-WorkLabProviderCommand -Provider $Provider -Verb 'Export' -Noun 'Template' `
             -Arguments @{ Context = $ctx; VmName = $tplName } | Out-Null
