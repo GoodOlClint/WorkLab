@@ -80,24 +80,29 @@ Describe 'New-WorkLabImageTemplate' {
             $script:calls | Should -Contain 'New-Vm'
             $script:calls | Should -Contain 'Export-Template'
             $script:calls | Should -Contain 'Remove-Network'
+            # The uploaded install ISO is removed after the build (no leak).
+            $script:calls | Should -Contain 'Remove-Iso'
             # Network created before VM, torn down after export.
             $script:calls.IndexOf('New-Network') | Should -BeLessThan $script:calls.IndexOf('New-Vm')
             $script:calls.IndexOf('Export-Template') | Should -BeLessThan ($script:calls.LastIndexOf('Remove-Network'))
         }
     }
 
-    It 'tears the ephemeral network down even when the build fails' {
+    It 'tears the ephemeral network + ISO down even when the build fails' {
         InModuleScope WorkLab {
             $script:teardown = 0
+            $script:isoRemoved = 0
             Mock Invoke-WorkLabProviderCommand -RemoveParameterType 'Provider' {
                 if ($Verb -eq 'Get' -and $Noun -eq 'Template') { return }
                 if ($Verb -eq 'New' -and $Noun -eq 'Vm') { throw 'boot failed' }
                 if ($Verb -eq 'Remove' -and $Noun -eq 'Network') { $script:teardown++ }
+                if ($Verb -eq 'Remove' -and $Noun -eq 'Iso') { $script:isoRemoved++ }
             }
             Mock Get-WorkLabImage { [pscustomobject]@{ Name = 'ws'; IsoPath = '/c/ws.iso' } }
             { New-WorkLabImageTemplate -Provider @{ Options = @{} } -ImageName ws -Confirm:$false } |
                 Should -Throw -ExpectedMessage '*boot failed*'
             $script:teardown | Should -Be 1
+            $script:isoRemoved | Should -Be 1
         }
     }
 }

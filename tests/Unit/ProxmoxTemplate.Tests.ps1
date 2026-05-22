@@ -125,6 +125,8 @@ Describe 'Copy-WorkLabProviderVm' {
             $r.Name | Should -Be 'lab-demo-dc01'
             $script:cfg.agent | Should -Be '1'
             $script:cfg.Keys | Should -Not -Contain 'net0'
+            # Install CD emptied (template's sata0 ISO is deleted post-build).
+            $script:cfg.sata0 | Should -Be 'none,media=cdrom'
         }
     }
 
@@ -143,6 +145,7 @@ Describe 'Copy-WorkLabProviderVm' {
             Copy-WorkLabProviderVm -Context @{ Slug = 'demo'; Options = @{ Server = 'p'; ApiToken = 't'; Node = 'n' } } -TemplateName lab-base-tpl01 -VmName lab-demo-dc01 -Confirm:$false | Out-Null
             $script:cfg.agent | Should -Be '1'
             $script:cfg.net0  | Should -Match 'bridge='
+            $script:cfg.sata0 | Should -Be 'none,media=cdrom'
         }
     }
 }

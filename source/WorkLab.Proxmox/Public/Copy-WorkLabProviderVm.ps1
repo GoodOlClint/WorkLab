@@ -74,7 +74,12 @@ function Copy-WorkLabProviderVm {
         # channel (Test/Invoke/Write/Read) never works and the reachability
         # wait times out. (No 'boot' key here, so the PSProxmoxVE
         # device-reparse bug — see WorkLab New-WorkLabProviderVm — doesn't apply.)
-        $agentCfg = @{ agent = '1' }
+        # Empty the install CD: the clone inherits the template's sata0, which
+        # points at the build ISO that New-WorkLabImageTemplate deletes after the
+        # build. Booting a clone with a CD-ROM referencing a missing ISO fails
+        # ("Could not open ..."), so swap it for an empty drive (kept, not
+        # removed, so the boot order's sata0 entry stays valid).
+        $agentCfg = @{ agent = '1'; sata0 = 'none,media=cdrom' }
 
         # The template's NIC may reference a deleted ephemeral build VNet.
         # When cloning into a lab (Context.Slug present), re-attach net0 to

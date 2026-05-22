@@ -60,9 +60,14 @@ function New-WorkLabImageTemplate {
             -Arguments @{ Context = $ctx; VmName = $tplName } | Out-Null
     }
     finally {
-        # Ephemeral build network is always torn down, success or failure.
+        # Always tear down the ephemeral build network AND the uploaded install
+        # ISO, success or failure. Neither is needed once the template exists --
+        # the clone's CD is emptied at clone time (Copy-WorkLabProviderVm) -- and
+        # leaving the ISO behind leaks storage on every build.
         Invoke-WorkLabProviderCommand -Provider $Provider -Verb 'Remove' -Noun 'Network' `
             -Arguments @{ Context = $ctx } -ErrorAction SilentlyContinue | Out-Null
+        Invoke-WorkLabProviderCommand -Provider $Provider -Verb 'Remove' -Noun 'Iso' `
+            -Arguments @{ Context = $ctx; Name = $isoLeaf } -ErrorAction SilentlyContinue | Out-Null
     }
 
     Write-PSFMessage -Level Significant -Message "Built template '{0}' for image '{1}'." -StringValues $tplName, $ImageName
