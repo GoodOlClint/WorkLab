@@ -16,6 +16,7 @@ function New-WorkLabAutounattend {
         [Parameter(Mandatory)][securestring]$AdminPassword,
         [Parameter()][string]$Locale = 'en-US',
         [Parameter()][string]$GuestAgentMsiPath,
+        [Parameter()][string]$VirtioDriverMsiPath,
         [Parameter()][ValidateSet('Uefi', 'Bios')][string]$Firmware = 'Uefi',
         [Parameter()][string]$ProductKey,
         [Parameter(Mandatory)][string]$OutFile
@@ -49,10 +50,27 @@ function New-WorkLabAutounattend {
     }
     else { '' }
 
-    # Build FirstLogonCommands: install the guest agent (when supplied) BEFORE
-    # sysprep so the agent service is registered and survives generalize. The
-    # commands run sequentially under AutoLogon=Administrator.
+    # Build FirstLogonCommands: install the virtio guest-tools drivers, then the
+    # guest agent (each when supplied), BEFORE sysprep so they land in the
+    # DriverStore / service registry and survive generalize. The driver MSI runs
+    # first so the virtio-serial driver (vioser) is present before qemu-ga's
+    # service binds its channel. The non-storage virtio drivers (vioser, NetKVM,
+    # balloon, ...) are installed here, online, by the vendor MSI rather than
+    # offline-injected: the virtio-win ISO's per-driver/per-OS/per-arch layout
+    # makes a single recursive DISM Add-WindowsDriver fail (mixed x86/ARM64), and
+    # the MSI does the arch/OS matching for us. Storage drivers (viostor/vioscsi)
+    # still MUST be offline-injected (see Build-WorkLabImage) -- the disk has to
+    # be visible before Setup runs and at first boot, long before FirstLogon.
+    # The commands run sequentially under AutoLogon=Administrator.
+    # ADDLOCAL=ALL forces every driver feature to install locally. The
+    # virtio-win-gt MSI's features are all install-level 1 (so /qn would install
+    # them anyway), but the MSI ships no INSTALLLEVEL property, so be explicit
+    # rather than rely on the engine's default level -- this is also the
+    # documented unattended invocation.
     $cmds = [System.Collections.Generic.List[string]]::new()
+    if ($VirtioDriverMsiPath) {
+        $cmds.Add(('        <SynchronousCommand wcm:action="add"><Order>{0}</Order><CommandLine>msiexec /i "{1}" /qn /norestart ADDLOCAL=ALL</CommandLine><Description>WorkLab virtio guest-tools driver install (Phase 2.5)</Description></SynchronousCommand>' -f ($cmds.Count + 1), $VirtioDriverMsiPath))
+    }
     if ($GuestAgentMsiPath) {
         $cmds.Add(('        <SynchronousCommand wcm:action="add"><Order>{0}</Order><CommandLine>msiexec /i "{1}" /qn /norestart</CommandLine><Description>WorkLab guest-agent install (Phase 2.5)</Description></SynchronousCommand>' -f ($cmds.Count + 1), $GuestAgentMsiPath))
     }

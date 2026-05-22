@@ -40,12 +40,19 @@ function Build-WorkLabImage {
 
     .PARAMETER VirtioWinIso
         Optional path to virtio-win.iso (Fedora/Red Hat). When supplied:
-        virtio storage/NIC drivers are offline-injected so Windows Setup sees
-        the disk/NIC on Proxmox, AND the qemu-guest-agent MSI is staged into
-        the WIM at C:\Windows\Setup\Files\qemu-ga.msi. The autounattend's
-        FirstLogonCommands installs the MSI BEFORE sysprep so the agent
-        service is registered and survives generalize -- every clone boots
-        with a working agent. Required for Phase 2.5 guest-channel labs.
+        virtio STORAGE drivers (viostor/vioscsi) are offline-injected into
+        install.wim and boot.wim so Windows Setup -- and the installed OS at
+        first boot -- can see the virtio0 disk. The other drivers (vioser for
+        the guest-agent channel, NetKVM, balloon, ...) plus the qemu-guest-agent
+        are NOT offline-injected; instead the virtio-win-gt-x64.msi driver
+        installer and the qemu-ga MSI are staged into the WIM under
+        C:\Windows\Setup\Files and installed by the autounattend's
+        FirstLogonCommands BEFORE sysprep, so they land in the DriverStore /
+        service registry and survive generalize -- every clone boots with a
+        working agent. (Online MSI install is used because the virtio-win ISO's
+        mixed-arch per-driver layout makes a single recursive offline DISM
+        inject fail; the vendor MSI does the arch/OS matching.) Required for
+        Phase 2.5 guest-channel labs.
 
     .PARAMETER Force
         Rebuild even if a matching manifest already exists.
@@ -126,8 +133,9 @@ function Build-WorkLabImage {
     Remove-Item -LiteralPath $workDir, $mountDir -Recurse -Force -ErrorAction SilentlyContinue
     $null = New-Item -ItemType Directory -Force -Path $dir
 
-    # In-guest path where the qemu-ga MSI lands when -VirtioWinIso is supplied.
+    # In-guest paths where the staged MSIs land when -VirtioWinIso is supplied.
     $inGuestAgentPath = 'C:\Windows\Setup\Files\qemu-ga.msi'
+    $inGuestDriverMsiPath = 'C:\Windows\Setup\Files\virtio-win-gt-x64.msi'
     $virtio = $null
 
     try {
@@ -147,10 +155,12 @@ function Build-WorkLabImage {
             # User drivers/updates last so anything user-supplied takes precedence
             # on duplicate driver INFs (DISM preserves higher-versioned matches).
             Add-WorkLabWimContent -MountDir $mountDir -DriverPath $DriverPath -UpdatePath $UpdatePath
-            # Stage the agent MSI into the WIM at the in-guest install path.
+            # Stage the driver-installer + agent MSIs into the WIM at their
+            # in-guest install paths. FirstLogonCommands runs them pre-sysprep.
             if ($virtio) {
                 $stagedDir = Join-Path $mountDir 'Windows\Setup\Files'
                 $null = New-Item -ItemType Directory -Force -Path $stagedDir
+                Copy-Item -LiteralPath $virtio.DriverMsiPath -Destination (Join-Path $stagedDir 'virtio-win-gt-x64.msi') -Force
                 Copy-Item -LiteralPath $virtio.AgentMsiPath -Destination (Join-Path $stagedDir 'qemu-ga.msi') -Force
             }
             Dismount-WorkLabWim -MountDir $mountDir
@@ -188,7 +198,10 @@ function Build-WorkLabImage {
             Locale        = $Locale
             OutFile       = (Join-Path $workDir 'autounattend.xml')
         }
-        if ($virtio) { $auaParams['GuestAgentMsiPath'] = $inGuestAgentPath }
+        if ($virtio) {
+            $auaParams['GuestAgentMsiPath'] = $inGuestAgentPath
+            $auaParams['VirtioDriverMsiPath'] = $inGuestDriverMsiPath
+        }
         if ($ProductKey) { $auaParams['ProductKey'] = $ProductKey }
         New-WorkLabAutounattend @auaParams | Out-Null
 
@@ -205,6 +218,7 @@ function Build-WorkLabImage {
             updates        = $UpdatePath
             virtioWinIso   = $VirtioWinIso
             virtioSha256   = $virtioSha
+            virtioDriverPath = if ($virtio) { $inGuestDriverMsiPath } else { $null }
             guestAgentPath = if ($virtio) { $inGuestAgentPath } else { $null }
             isoFile        = $isoOut
             isoSha256      = (Get-WorkLabFileChecksum -Path $isoOut)

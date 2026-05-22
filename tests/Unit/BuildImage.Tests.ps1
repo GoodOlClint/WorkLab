@@ -115,6 +115,32 @@ Describe 'New-WorkLabAutounattend' {
             finally { Remove-Item $out -ErrorAction SilentlyContinue }
         }
     }
+
+    It 'installs the virtio driver MSI before the agent before sysprep when -VirtioDriverMsiPath is set' {
+        InModuleScope WorkLab {
+            $ss = ConvertTo-SecureString 'P@ss' -AsPlainText -Force
+            $out = Join-Path ([IO.Path]::GetTempPath()) "wl-au3-$([guid]::NewGuid().ToString('N')).xml"
+            try {
+                New-WorkLabAutounattend -Edition 1 -AdminPassword $ss `
+                    -VirtioDriverMsiPath 'C:\Windows\Setup\Files\virtio-win-gt-x64.msi' `
+                    -GuestAgentMsiPath 'C:\Windows\Setup\Files\qemu-ga.msi' -OutFile $out | Out-Null
+                $xml = Get-Content -LiteralPath $out -Raw
+                { [xml]$xml } | Should -Not -Throw
+                # Drivers (Order 1) -> agent (Order 2) -> sysprep (Order 3).
+                # ADDLOCAL=ALL forces every driver feature to install.
+                $xml | Should -BeLike '*virtio-win-gt-x64.msi" /qn /norestart ADDLOCAL=ALL*'
+                $xml | Should -BeLike '*<Order>1</Order>*virtio-win-gt-x64.msi*'
+                $xml | Should -BeLike '*<Order>2</Order>*qemu-ga.msi*'
+                $xml | Should -BeLike '*<Order>3</Order>*Sysprep.exe /generalize*'
+                $drvIdx = $xml.IndexOf('virtio-win-gt-x64.msi')
+                $agtIdx = $xml.IndexOf('qemu-ga.msi')
+                $sysIdx = $xml.IndexOf('Sysprep.exe')
+                $drvIdx | Should -BeLessThan $agtIdx
+                $agtIdx | Should -BeLessThan $sysIdx
+            }
+            finally { Remove-Item $out -ErrorAction SilentlyContinue }
+        }
+    }
 }
 
 Describe 'Resolve-WorkLabOscdimg' {
@@ -237,7 +263,7 @@ Describe 'Build-WorkLabImage pipeline (seams mocked)' {
         }
     }
 
-    It 'with -VirtioWinIso: injects virtio drivers, stages qemu-ga MSI, and threads GuestAgentMsiPath through' {
+    It 'with -VirtioWinIso: injects storage drivers, stages the driver + qemu-ga MSIs, and threads both paths through' {
         $virtioSrc = Join-Path ([IO.Path]::GetTempPath()) "wl-virtio-$([guid]::NewGuid().ToString('N')).iso"
         Set-Content -LiteralPath $virtioSrc -Value 'fake-virtio' -NoNewline
         try {
@@ -263,36 +289,44 @@ Describe 'Build-WorkLabImage pipeline (seams mocked)' {
                     $script:virtioMounts++
                     [pscustomobject]@{
                         Volume = '/v'; DriverPath = '/v/amd64'
+                        DriverMsiPath = '/v/virtio-win-gt-x64.msi'
                         AgentMsiPath = '/v/guest-agent/qemu-ga-x86_64.msi'
                     }
                 }
                 Mock Dismount-WorkLabVirtioWin { $script:virtioDismounts++ }
 
-                $script:msiCopies = 0
-                Mock Copy-Item -ParameterFilter { "$LiteralPath" -like '*qemu-ga*.msi' } { $script:msiCopies++ }
+                # Both MSIs (driver installer + qemu-ga) are staged into the WIM.
+                $script:msiCopies = [System.Collections.Generic.List[string]]::new()
+                Mock Copy-Item -ParameterFilter { "$LiteralPath" -like '*.msi' } { $script:msiCopies.Add("$LiteralPath") }
 
-                # Capture the agent path Autounattend was called with. Pester
+                # Capture the paths Autounattend was called with. Pester
                 # mocks expose bound params as auto-vars; $PSBoundParameters in
                 # the mock body is the *mock scriptblock's* PSBP, not the
                 # mocked cmdlet's.
                 $script:auaGuestAgent = $null
-                Mock New-WorkLabAutounattend { $script:auaGuestAgent = $GuestAgentMsiPath; $OutFile }
+                $script:auaDriverMsi = $null
+                Mock New-WorkLabAutounattend { $script:auaGuestAgent = $GuestAgentMsiPath; $script:auaDriverMsi = $VirtioDriverMsiPath; $OutFile }
 
                 $r = Build-WorkLabImage -Name wsv -SourceIso $Src -VirtioWinIso $VSrc -Confirm:$false
                 $r.Existed | Should -BeFalse
                 $r.Manifest.virtioSha256 | Should -Match '^[0-9a-f]{64}$'
                 $r.Manifest.guestAgentPath | Should -Be 'C:\Windows\Setup\Files\qemu-ga.msi'
+                $r.Manifest.virtioDriverPath | Should -Be 'C:\Windows\Setup\Files\virtio-win-gt-x64.msi'
 
                 $script:virtioMounts | Should -Be 1
                 $script:virtioDismounts | Should -Be 1
-                $script:msiCopies | Should -Be 1
-                # Add-WorkLabWimContent calls: install.wim gets virtio + user
-                # drivers (2), then boot.wim gets virtio drivers per image (2:
-                # WinPE + Setup) = 4 total. boot.wim indices were enumerated once.
+                # Both source MSIs were staged.
+                $script:msiCopies.Count | Should -Be 2
+                $script:msiCopies | Should -Contain '/v/virtio-win-gt-x64.msi'
+                $script:msiCopies | Should -Contain '/v/guest-agent/qemu-ga-x86_64.msi'
+                # Add-WorkLabWimContent calls: install.wim gets virtio storage +
+                # user drivers (2), then boot.wim gets storage drivers per image
+                # (2: WinPE + Setup) = 4 total. boot.wim indices enumerated once.
                 $script:wimAdds | Should -Be 4
                 $script:bootIndexCalls | Should -Be 1
-                # Autounattend received the in-guest agent path.
+                # Autounattend received both in-guest MSI paths.
                 $script:auaGuestAgent | Should -Be 'C:\Windows\Setup\Files\qemu-ga.msi'
+                $script:auaDriverMsi  | Should -Be 'C:\Windows\Setup\Files\virtio-win-gt-x64.msi'
             }
         }
         finally { Remove-Item -LiteralPath $virtioSrc -ErrorAction SilentlyContinue }
