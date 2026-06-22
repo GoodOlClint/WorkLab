@@ -26,7 +26,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache build dependencies
         # Exact-key only: no restore-keys fallback. A pin bump in
@@ -83,7 +83,7 @@ jobs:
       # Phase 2 image pipeline (Windows + Windows ISO required)
       WORKLAB_IMG_TEST_SOURCE_ISO: ${{ secrets.WORKLAB_IMG_TEST_SOURCE_ISO }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Integration tests
         shell: pwsh
         run: ./build.ps1 -Tasks integration
